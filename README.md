@@ -37,4 +37,4 @@ SwiftUI + AVFoundation + Vision + CoreLocation + Core Data 的本地实时门头
 - `KEYCHAIN_PASSWORD`：CI 临时 keychain 密码
 - `DEVELOPMENT_TEAM`：Apple Developer Team ID
 
-本项目当前 Bundle Identifier 是 `com.example.ShopCapture`。如果要导出可安装到设备或提交商店的 IPA，需要先在 Xcode 和 Apple Developer 后台把 Bundle Identifier、证书和描述文件改成你自己的应用配置。
+本项目当前 Bundle Identifier 是 `com.bully1990.shopcapture`。如果要导出可安装到设备或提交商店的 IPA，需要在 Apple Developer 后台使用同一个 Bundle Identifier 创建 App ID、证书和描述文件。

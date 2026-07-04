@@ -4,3 +4,8 @@ DerivedData/
 build/
 *.xcarchive
 *.ipa
+signing/*.key
+signing/*.certSigningRequest
+signing/*.p12
+signing/*.cer
+signing/*.mobileprovision

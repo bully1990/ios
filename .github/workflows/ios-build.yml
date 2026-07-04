@@ -22,7 +22,7 @@ env:
   PROJECT: ShopCapture.xcodeproj
   SCHEME: ShopCapture
   CONFIGURATION: Release
-  BUNDLE_IDENTIFIER: com.example.ShopCapture
+  BUNDLE_IDENTIFIER: com.bully1990.shopcapture
   EXPORT_METHOD: ${{ inputs.export_method || 'development' }}
 
 jobs:
