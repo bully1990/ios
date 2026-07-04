@@ -178,7 +178,7 @@ jobs:
     name: Build unsigned IPA
     runs-on: macos-latest
     timeout-minutes: 30
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_unsigned_ipa }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_unsigned_ipa) }}
 
     steps:
       - name: Checkout
