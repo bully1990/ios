@@ -27,6 +27,7 @@ SwiftUI + AVFoundation + Vision + CoreLocation + Core Data 的本地实时门头
 仓库已添加 `.github/workflows/ios-build.yml`：
 
 - 推送到 `main`/`master` 或提交 Pull Request 时，会在 macOS runner 上执行未签名的 iOS Simulator Release 构建，并上传 `ShopCapture-simulator-app.zip` artifact。
+- 在 GitHub Actions 页面手动运行 `Build iOS App`，并勾选 `build_unsigned_ipa` 时，会构建未签名的真机 IPA，并上传 `ShopCapture-unsigned-ipa` artifact。这个 IPA 通常不能直接安装到真机，需要后续重签名。
 - 在 GitHub Actions 页面手动运行 `Build iOS App`，并勾选 `build_signed_ipa` 时，还会尝试执行真机归档并导出 `ShopCapture-ipa` artifact。
 
 导出 IPA 前，需要先在仓库的 `Settings -> Secrets and variables -> Actions` 中配置这些 secrets：

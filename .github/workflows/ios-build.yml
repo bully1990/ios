@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_unsigned_ipa:
+        description: "Build an unsigned device IPA for later re-signing"
+        required: false
+        type: boolean
+        default: false
       export_method:
         description: "IPA export method: development, ad-hoc, app-store, enterprise"
         required: false
@@ -166,5 +171,50 @@ jobs:
         with:
           name: ShopCapture-ipa
           path: build/export/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  unsigned-ipa:
+    name: Build unsigned IPA
+    runs-on: macos-latest
+    timeout-minutes: 30
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_unsigned_ipa }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build unsigned device app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find build/DerivedData/Build/Products/"$CONFIGURATION"-iphoneos -maxdepth 1 -type d -name "$SCHEME.app" -print -quit)"
+          test -n "$APP_PATH"
+          mkdir -p build/unsigned-ipa/Payload build/artifacts
+          ditto "$APP_PATH" "build/unsigned-ipa/Payload/$SCHEME.app"
+          (cd build/unsigned-ipa && zip -qry "../artifacts/$SCHEME-unsigned.ipa" Payload)
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShopCapture-unsigned-ipa
+          path: build/artifacts/ShopCapture-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
