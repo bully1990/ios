@@ -1,9 +1,12 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 
 struct CameraCaptureView: View {
     @StateObject private var processor = CameraFrameProcessor()
     @EnvironmentObject private var locationProvider: LocationProvider
     @State private var isShowingHistory = false
+    @State private var selectedPhoto: PhotosPickerItem?
 
     var body: some View {
         ZStack {
@@ -24,7 +27,18 @@ struct CameraCaptureView: View {
 
             VStack {
                 HStack {
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        Image(systemName: "photo.on.rectangle")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.black.opacity(0.45))
+                            .clipShape(Circle())
+                    }
+                    .accessibilityLabel("从相册选择")
+
                     Spacer()
+
                     Button {
                         isShowingHistory = true
                     } label: {
@@ -68,6 +82,39 @@ struct CameraCaptureView: View {
         .onDisappear {
             processor.stop()
         }
+        .onChange(of: selectedPhoto) { _, item in
+            guard let item else {
+                return
+            }
+
+            Task {
+                await importPhoto(item)
+                selectedPhoto = nil
+            }
+        }
+    }
+
+    private func importPhoto(_ item: PhotosPickerItem) async {
+        do {
+            processor.setMessage("正在识别相册图片")
+
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else {
+                processor.setMessage("图片读取失败")
+                return
+            }
+
+            guard let frame = try await ImageTextRecognizer.detectShopFrame(in: image) else {
+                processor.setMessage("未识别到电话号码")
+                return
+            }
+
+            processor.setMessage("正在保存")
+            CaptureCoordinator.shared.save(frame: frame, processor: processor)
+        } catch {
+            print("Warning: failed to import photo: \(error.localizedDescription)")
+            processor.setMessage("相册识别失败")
+        }
     }
 }
 
@@ -85,6 +132,10 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
     }
 
     func cameraFrameProcessor(_ processor: CameraFrameProcessor, didDetect frame: DetectedShopFrame) {
+        save(frame: frame, processor: processor)
+    }
+
+    func save(frame: DetectedShopFrame, processor: CameraFrameProcessor) {
         guard !isSaving else {
             return
         }

@@ -104,6 +104,10 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         message = "保存失败"
     }
 
+    func setMessage(_ message: String?) {
+        self.message = message
+    }
+
     private func requestAccessIfNeeded(completion: @escaping (Bool) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:

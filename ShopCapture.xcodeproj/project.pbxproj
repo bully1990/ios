@@ -22,6 +22,7 @@
 		0A00000D2C31000100000000 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0A00001D2C31000100000000 /* Assets.xcassets */; };
 		0A00000E2C31000100000000 /* ShopRecord.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 0A00001F2C31000100000000 /* ShopRecord.xcdatamodeld */; };
 		0A00000F2C31000100000000 /* ShopCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000202C31000100000000 /* ShopCaptureTests.swift */; };
+		0A0000402C31000100000000 /* ImageTextRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000412C31000100000000 /* ImageTextRecognizer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -53,6 +54,7 @@
 		0A0000202C31000100000000 /* ShopCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShopCaptureTests.swift; sourceTree = "<group>"; };
 		0A0000222C31000100000000 /* ShopCaptureTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ShopCaptureTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0000232C31000100000000 /* ShopRecord.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = ShopRecord.xcdatamodel; sourceTree = "<group>"; };
+		0A0000412C31000100000000 /* ImageTextRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTextRecognizer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -96,6 +98,7 @@
 				0A0000192C31000100000000 /* HistoryView.swift */,
 				0A00001A2C31000100000000 /* RecordDetailView.swift */,
 				0A00001B2C31000100000000 /* ImageLoader.swift */,
+				0A0000412C31000100000000 /* ImageTextRecognizer.swift */,
 				0A00001C2C31000100000000 /* PhoneNumberExtractor.swift */,
 				0A00001D2C31000100000000 /* Assets.xcassets */,
 				0A00001E2C31000100000000 /* Info.plist */,
@@ -231,6 +234,7 @@
 				0A0000092C31000100000000 /* HistoryView.swift in Sources */,
 				0A00000A2C31000100000000 /* RecordDetailView.swift in Sources */,
 				0A00000B2C31000100000000 /* ImageLoader.swift in Sources */,
+				0A0000402C31000100000000 /* ImageTextRecognizer.swift in Sources */,
 				0A00000C2C31000100000000 /* PhoneNumberExtractor.swift in Sources */,
 				0A00000E2C31000100000000 /* ShopRecord.xcdatamodeld in Sources */,
 			);
