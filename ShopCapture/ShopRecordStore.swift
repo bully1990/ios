@@ -37,6 +37,18 @@ enum ShopRecordStore {
         }
     }
 
+    @MainActor
+    static func delete(_ record: ShopRecord, context: NSManagedObjectContext) throws {
+        let imagePath = record.imagePath
+        context.delete(record)
+
+        if context.hasChanges {
+            try context.save()
+        }
+
+        try deleteImage(at: imagePath)
+    }
+
     private static func writeImage(_ image: UIImage, id: UUID) throws -> URL {
         guard let jpegData = image.jpegData(compressionQuality: 0.8) else {
             throw CocoaError(.fileWriteUnknown)
@@ -70,5 +82,13 @@ enum ShopRecordStore {
         }
 
         return directory
+    }
+
+    private static func deleteImage(at path: String?) throws {
+        guard let path, !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
+            return
+        }
+
+        try FileManager.default.removeItem(atPath: path)
     }
 }

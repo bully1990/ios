@@ -3,6 +3,7 @@ import SwiftUI
 
 struct HistoryView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.managedObjectContext) private var viewContext
 
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(keyPath: \ShopRecord.timestamp, ascending: false)],
@@ -22,14 +23,29 @@ struct HistoryView: View {
                         HistoryRow(record: record)
                     }
                 }
+                .onDelete(perform: deleteRecords)
             }
         }
         .navigationTitle("历史记录")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                EditButton()
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Button("关闭") {
                     dismiss()
                 }
+            }
+        }
+    }
+
+    private func deleteRecords(at offsets: IndexSet) {
+        for index in offsets {
+            do {
+                try ShopRecordStore.delete(records[index], context: viewContext)
+            } catch {
+                print("Warning: failed to delete record: \(error.localizedDescription)")
             }
         }
     }

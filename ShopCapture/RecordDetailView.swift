@@ -3,7 +3,10 @@ import MapKit
 import SwiftUI
 
 struct RecordDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.managedObjectContext) private var viewContext
     @ObservedObject var record: ShopRecord
+    @State private var isShowingDeleteConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -60,6 +63,25 @@ struct RecordDetailView: View {
         }
         .navigationTitle("详情")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) {
+                    isShowingDeleteConfirmation = true
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+        }
+        .confirmationDialog("删除这条历史记录？", isPresented: $isShowingDeleteConfirmation, titleVisibility: .visible) {
+            Button("删除记录", role: .destructive) {
+                deleteRecord()
+            }
+
+            Button("取消", role: .cancel) {
+            }
+        } message: {
+            Text("删除后会同时移除保存的门头图片。")
+        }
     }
 
     private var coordinate: CLLocationCoordinate2D {
@@ -71,5 +93,14 @@ struct RecordDetailView: View {
             center: coordinate,
             span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
         ))
+    }
+
+    private func deleteRecord() {
+        do {
+            try ShopRecordStore.delete(record, context: viewContext)
+            dismiss()
+        } catch {
+            print("Warning: failed to delete record: \(error.localizedDescription)")
+        }
     }
 }
