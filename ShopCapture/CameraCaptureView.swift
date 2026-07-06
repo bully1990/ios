@@ -210,12 +210,14 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
         processor.setMessage("正在整理名称和服务")
 
         do {
-            return try await DeepSeekClient.summarize(fullText: frame.fullText, phoneNumber: frame.phoneNumber)
+            if let summary = try await DeepSeekClient.summarize(fullText: frame.fullText, phoneNumber: frame.phoneNumber) {
+                return summary
+            }
         } catch {
             print("Warning: DeepSeek summary failed: \(error.localizedDescription)")
-            processor.setMessage("整理失败，继续保存")
-            return nil
         }
+
+        return ShopTextSummarizer.summarizeLocally(fullText: frame.fullText, phoneNumber: frame.phoneNumber)
     }
 
     func cameraFrameProcessor(_ processor: CameraFrameProcessor, didChangeMessage message: String?) {

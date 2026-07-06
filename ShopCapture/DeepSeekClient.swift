@@ -9,6 +9,82 @@ struct ShopTextSummary {
     }
 }
 
+enum ShopTextSummarizer {
+    static func summarizeLocally(fullText: String, phoneNumber: String) -> ShopTextSummary? {
+        let lines = normalizedLines(from: fullText)
+        guard !lines.isEmpty else {
+            return nil
+        }
+
+        let shopName = candidateName(from: lines, phoneNumber: phoneNumber)
+        let services = candidateServices(from: lines, excluding: shopName, phoneNumber: phoneNumber)
+        let result = ShopTextSummary(shopName: shopName, serviceContent: services)
+
+        return result.hasUsefulContent ? result : nil
+    }
+
+    private static func normalizedLines(from text: String) -> [String] {
+        text
+            .components(separatedBy: .newlines)
+            .map { line in
+                line
+                    .replacingOccurrences(of: "：", with: ":")
+                    .replacingOccurrences(of: "一", with: " ")
+                    .replacingOccurrences(of: "—", with: " ")
+                    .replacingOccurrences(of: "-", with: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func candidateName(from lines: [String], phoneNumber: String) -> String? {
+        let usefulLines = lines.filter { !isPhoneLine($0, phoneNumber: phoneNumber) }
+
+        if let trailingName = usefulLines.last(where: { isLikelyName($0) && !isLikelyService($0) }) {
+            return trailingName
+        }
+
+        if let companyName = usefulLines.first(where: { line in
+            ["公司", "店", "厂", "经营部", "商行", "中心", "门市", "维修部"].contains { line.contains($0) }
+        }) {
+            return companyName
+        }
+
+        return usefulLines.first(where: isLikelyName)
+    }
+
+    private static func candidateServices(from lines: [String], excluding shopName: String?, phoneNumber: String) -> String? {
+        let serviceLines = lines
+            .filter { line in
+                line != shopName && !isPhoneLine(line, phoneNumber: phoneNumber) && isLikelyService(line)
+            }
+            .prefix(4)
+
+        let services = serviceLines.joined(separator: "；")
+        return services.isEmpty ? nil : services
+    }
+
+    private static func isPhoneLine(_ line: String, phoneNumber: String) -> Bool {
+        let digits = line.filter(\.isNumber)
+        return line.contains("电话") || (!phoneNumber.isEmpty && digits == phoneNumber)
+    }
+
+    private static func isLikelyName(_ line: String) -> Bool {
+        let compact = line.replacingOccurrences(of: " ", with: "")
+        return compact.count >= 2 && compact.count <= 12 && !compact.contains(":")
+    }
+
+    private static func isLikelyService(_ line: String) -> Bool {
+        let keywords = [
+            "加工", "维修", "回收", "安装", "订做", "定做", "订制", "定制",
+            "剪", "折弯", "激光", "切割", "焊接", "钣金", "铁板", "冷轧板",
+            "不锈钢", "机箱", "机柜", "门窗", "招牌", "广告", "开锁", "搬家"
+        ]
+
+        return keywords.contains { line.contains($0) }
+    }
+}
+
 enum DeepSeekClient {
     private static let endpoint = URL(string: "https://api.deepseek.com/chat/completions")!
     private static let model = "deepseek-chat"

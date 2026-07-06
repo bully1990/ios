@@ -25,4 +25,18 @@ final class ShopCaptureTests: XCTestCase {
     func testRejectsTextWithoutPhoneNumber() {
         XCTAssertNil(PhoneNumberExtractor.firstPhoneNumber(in: "营业时间 09:00-18:00"))
     }
+
+    func testLocalSummaryExtractsTrailingShopNameAndServices() {
+        let text = """
+        钣金剪折弯 激光切割加工
+        羽硕一铁板 冷轧板 4米哥折堂 创槽
+        经种机箱一桃柜订做三焊接加工
+        电话：138 2610 8311
+        大月
+        """
+
+        let summary = ShopTextSummarizer.summarizeLocally(fullText: text, phoneNumber: "13826108311")
+        XCTAssertEqual(summary?.shopName, "大月")
+        XCTAssertEqual(summary?.serviceContent, "钣金剪折弯 激光切割加工；羽硕 铁板 冷轧板 4米哥折堂 创槽；经种机箱 桃柜订做三焊接加工")
+    }
 }
