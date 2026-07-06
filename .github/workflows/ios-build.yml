@@ -28,6 +28,8 @@ jobs:
       - name: Build unsigned device app
         run: |
           set -euo pipefail
+          mkdir -p build
+          set +e
           xcodebuild \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -38,7 +40,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            clean build
+            clean build 2>&1 | tee build/xcodebuild.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            summary="$(tail -n 80 build/xcodebuild.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')"
+            echo "::error title=xcodebuild failed::$summary"
+            exit "$status"
+          fi
 
       - name: Package unsigned IPA
         run: |
