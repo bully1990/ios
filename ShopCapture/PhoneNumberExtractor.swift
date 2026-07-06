@@ -1,8 +1,9 @@
 import Foundation
 
 enum PhoneNumberExtractor {
-    private static let mobilePattern = #"(?<!\d)1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}(?!\d)"#
-    private static let landlinePattern = #"(?<!\d)(?:0\d{2,3}[\s-]?)?\d{7,8}(?:[\s-]?(?:转|ext\.?|#)\s?\d{1,6})?(?!\d)"#
+    private static let separatorPattern = #"[\s\-–—－·.]*"#
+    private static let mobilePattern = #"(?<!\d)1"# + separatorPattern + #"[3-9]"# + separatorPattern + #"\d(?:"# + separatorPattern + #"\d){8}(?!\d)"#
+    private static let landlinePattern = #"(?<!\d)(?:0\d{2,3}"# + separatorPattern + #")?\d{7,8}(?:"# + separatorPattern + #"(?:转|ext\.?|#)"# + separatorPattern + #"\d{1,6})?(?!\d)"#
 
     static func firstPhoneNumber(in text: String) -> String? {
         let normalized = normalizeOCRText(text)
@@ -19,10 +20,14 @@ enum PhoneNumberExtractor {
                 continue
             }
 
-            let candidate = String(normalized[swiftRange])
-                .replacingOccurrences(of: " ", with: "")
-                .replacingOccurrences(of: "-", with: "")
+            let candidate = String(normalized[swiftRange].filter(\.isNumber))
 
+            if isPlausible(candidate) {
+                return candidate
+            }
+        }
+
+        for candidate in numericRuns(in: normalized) {
             if isPlausible(candidate) {
                 return candidate
             }
@@ -32,15 +37,55 @@ enum PhoneNumberExtractor {
     }
 
     private static func normalizeOCRText(_ text: String) -> String {
-        text
+        let halfWidthText = text.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? text
+
+        return halfWidthText
             .replacingOccurrences(of: "O", with: "0")
             .replacingOccurrences(of: "o", with: "0")
+            .replacingOccurrences(of: "D", with: "0")
             .replacingOccurrences(of: "I", with: "1")
             .replacingOccurrences(of: "l", with: "1")
+            .replacingOccurrences(of: "|", with: "1")
             .replacingOccurrences(of: "｜", with: "1")
+            .replacingOccurrences(of: "Z", with: "2")
+            .replacingOccurrences(of: "z", with: "2")
+            .replacingOccurrences(of: "S", with: "5")
+            .replacingOccurrences(of: "s", with: "5")
+            .replacingOccurrences(of: "B", with: "8")
             .replacingOccurrences(of: "—", with: "-")
+            .replacingOccurrences(of: "–", with: "-")
             .replacingOccurrences(of: "－", with: "-")
             .replacingOccurrences(of: " ", with: " ")
+    }
+
+    private static func numericRuns(in text: String) -> [String] {
+        var runs: [String] = []
+        var current = ""
+
+        for character in text {
+            if character.isNumber {
+                current.append(character)
+            } else if isSoftSeparator(character), !current.isEmpty {
+                continue
+            } else {
+                appendCurrentRun(&current, to: &runs)
+            }
+        }
+
+        appendCurrentRun(&current, to: &runs)
+        return runs
+    }
+
+    private static func appendCurrentRun(_ current: inout String, to runs: inout [String]) {
+        if current.count >= 7 {
+            runs.append(current)
+        }
+
+        current = ""
+    }
+
+    private static func isSoftSeparator(_ character: Character) -> Bool {
+        character.isWhitespace || "-–—－·.()（）:：".contains(character)
     }
 
     private static func isPlausible(_ candidate: String) -> Bool {

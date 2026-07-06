@@ -7,6 +7,16 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "13800138000")
     }
 
+    func testExtractsShopSignMobileNumberWithGroupedDigits() {
+        let text = "大展新旧货\n电话：172 6668 8538"
+        XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "17266688538")
+    }
+
+    func testExtractsMobileNumberWithCommonOCRDigitMistakes() {
+        let text = "电话：17Z 666B B538"
+        XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "17266688538")
+    }
+
     func testExtractsLandlineNumber() {
         let text = "订餐电话：010-88886666"
         XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "01088886666")
