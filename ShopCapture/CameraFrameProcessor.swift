@@ -17,6 +17,12 @@ protocol CameraFrameProcessorDelegate: AnyObject {
 }
 
 final class CameraFrameProcessor: NSObject, ObservableObject {
+    private enum Constants {
+        static let frameProcessingInterval = 2
+        static let requiredStableDetections = 2
+        static let recognitionRegion = CGRect(x: 0.05, y: 0.15, width: 0.9, height: 0.7)
+    }
+
     enum CaptureState {
         case idle
         case detecting
@@ -212,7 +218,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private func process(sampleBuffer: CMSampleBuffer) {
         frameIndex += 1
 
-        guard frameIndex % 3 == 0 else {
+        guard frameIndex % Constants.frameProcessingInterval == 0 else {
             return
         }
 
@@ -243,7 +249,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
             request.recognitionLevel = .fast
             request.usesLanguageCorrection = false
-            request.regionOfInterest = CGRect(x: 0.2, y: 0.2, width: 0.6, height: 0.6)
+            request.regionOfInterest = Constants.recognitionRegion
             request.recognitionLanguages = ["zh-Hans", "en-US"]
 
             let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: imageOrientation, options: [:])
@@ -280,9 +286,9 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             stableCount = 1
         }
 
-        guard stableCount >= 5 else {
+        guard stableCount >= Constants.requiredStableDetections else {
             Task { @MainActor in
-                message = "识别中 \(stableCount)/5"
+                message = "识别中 \(stableCount)/\(Constants.requiredStableDetections)"
             }
             return
         }
