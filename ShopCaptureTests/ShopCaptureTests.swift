@@ -39,4 +39,16 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(summary?.shopName, "大月")
         XCTAssertEqual(summary?.serviceContent, "钣金剪折弯 激光切割加工；羽硕 铁板 冷轧板 4米哥折堂 创槽；经种机箱 桃柜订做三焊接加工")
     }
+
+    func testLocalSummaryBuildsNameFromServicesWhenNameMissing() {
+        let text = """
+        钣金剪折弯 激光切割加工
+        铁板 冷轧板 机箱订做 焊接加工
+        电话：138 2610 8311
+        """
+
+        let summary = ShopTextSummarizer.summarizeLocally(fullText: text, phoneNumber: "13826108311")
+        XCTAssertEqual(summary?.shopName, "钣金切割加工")
+        XCTAssertEqual(summary?.serviceContent, "钣金剪折弯 激光切割加工；铁板 冷轧板 机箱订做 焊接加工")
+    }
 }

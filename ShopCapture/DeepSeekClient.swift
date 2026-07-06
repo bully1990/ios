@@ -16,9 +16,21 @@ enum ShopTextSummarizer {
             return nil
         }
 
-        let shopName = candidateName(from: lines, phoneNumber: phoneNumber)
-        let services = candidateServices(from: lines, excluding: shopName, phoneNumber: phoneNumber)
+        let detectedName = candidateName(from: lines, phoneNumber: phoneNumber)
+        let services = candidateServices(from: lines, excluding: detectedName, phoneNumber: phoneNumber)
+        let shopName = detectedName ?? fallbackName(from: services)
         let result = ShopTextSummary(shopName: shopName, serviceContent: services)
+
+        return result.hasUsefulContent ? result : nil
+    }
+
+    static func ensureName(_ summary: ShopTextSummary?) -> ShopTextSummary? {
+        guard let summary else {
+            return nil
+        }
+
+        let shopName = summary.shopName ?? fallbackName(from: summary.serviceContent)
+        let result = ShopTextSummary(shopName: shopName, serviceContent: summary.serviceContent)
 
         return result.hasUsefulContent ? result : nil
     }
@@ -83,6 +95,46 @@ enum ShopTextSummarizer {
 
         return keywords.contains { line.contains($0) }
     }
+
+    private static func fallbackName(from services: String?) -> String? {
+        guard let services, !services.isEmpty else {
+            return nil
+        }
+
+        let keywords = [
+            "钣金", "激光切割", "切割", "折弯", "焊接", "机箱", "机柜",
+            "不锈钢", "铁板", "冷轧板", "维修", "安装", "回收", "广告", "招牌"
+        ]
+        let matched = keywords.filter { services.contains($0) }
+
+        if matched.contains("钣金"), matched.contains("激光切割") || matched.contains("切割") {
+            return "钣金切割加工"
+        }
+
+        if matched.contains("钣金"), matched.contains("折弯") {
+            return "钣金折弯加工"
+        }
+
+        if matched.contains("焊接"), matched.contains("机箱") || matched.contains("机柜") {
+            return "机箱焊接加工"
+        }
+
+        if let first = matched.first {
+            return "\(first)服务"
+        }
+
+        let compact = services
+            .components(separatedBy: CharacterSet(charactersIn: "；、,， "))
+            .first?
+            .filter { !$0.isNumber }
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !compact.isEmpty else {
+            return nil
+        }
+
+        return String(compact.prefix(8))
+    }
 }
 
 enum DeepSeekClient {
@@ -119,7 +171,7 @@ enum DeepSeekClient {
             serviceContent: cleaned(summary.services)
         )
 
-        return result.hasUsefulContent ? result : nil
+        return ShopTextSummarizer.ensureName(result)
     }
 
     private static func configuredAPIKey() -> String {
