@@ -33,6 +33,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             }
         }
     }
+    @Published private(set) var isRecognizing = false
 
     weak var delegate: CameraFrameProcessorDelegate?
 
@@ -49,11 +50,17 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var lastCaptureTime = Date.distantPast
 
     func start() {
+        Task { @MainActor in
+            self.isRecognizing = true
+            self.message = "正在开启识别"
+        }
+
         requestAccessIfNeeded { [weak self] granted in
             guard let self else { return }
 
             guard granted else {
                 Task { @MainActor in
+                    self.isRecognizing = false
                     self.message = "相机权限未开启"
                 }
                 return
@@ -63,17 +70,33 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                 self.configureSessionIfNeeded()
 
                 guard self.isConfigured else {
+                    Task { @MainActor in
+                        self.isRecognizing = false
+                    }
                     return
                 }
 
                 if !self.session.isRunning {
                     self.session.startRunning()
                 }
+
+                Task { @MainActor in
+                    self.isRecognizing = true
+                    self.message = "正在识别门头"
+                }
             }
         }
     }
 
     func stop() {
+        resetStability()
+        state = .idle
+
+        Task { @MainActor in
+            self.isRecognizing = false
+            self.message = nil
+        }
+
         sessionQueue.async {
             if self.session.isRunning {
                 self.session.stopRunning()

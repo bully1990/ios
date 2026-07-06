@@ -17,12 +17,34 @@ struct CameraCaptureView: View {
                 let height = proxy.size.height * 0.6
 
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(.white.opacity(0.82), lineWidth: 2)
+                    .stroke(processor.isRecognizing ? .white.opacity(0.82) : .white.opacity(0.35), lineWidth: 2)
                     .frame(width: width, height: height)
                     .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
                     .shadow(color: .black.opacity(0.32), radius: 8)
             }
             .allowsHitTesting(false)
+
+            if !processor.isRecognizing {
+                VStack(spacing: 12) {
+                    Image(systemName: "viewfinder")
+                        .font(.system(size: 42, weight: .semibold))
+                        .foregroundStyle(.white)
+
+                    Text("点击开始识别后开启摄像头")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                    Text("也可以从相册选择门头图片识别")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.78))
+                }
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 22)
+                .background(.black.opacity(0.48))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .padding(.horizontal, 26)
+            }
 
             VStack {
                 HStack {
@@ -57,16 +79,33 @@ struct CameraCaptureView: View {
 
                 Spacer()
 
-                if let message = processor.message {
-                    Text(message)
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(.black.opacity(0.55))
-                        .clipShape(Capsule())
-                        .padding(.bottom, 28)
+                VStack(spacing: 12) {
+                    if let message = processor.message {
+                        Text(message)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(.black.opacity(0.55))
+                            .clipShape(Capsule())
+                    }
+
+                    Button {
+                        toggleRecognition()
+                    } label: {
+                        Label(processor.isRecognizing ? "停止识别" : "开始识别", systemImage: processor.isRecognizing ? "stop.fill" : "camera.viewfinder")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                            .background(processor.isRecognizing ? .red.opacity(0.9) : .green.opacity(0.9))
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
+                    }
+                    .accessibilityLabel(processor.isRecognizing ? "停止识别" : "开始识别")
                 }
+                .padding(.horizontal, 22)
+                .padding(.bottom, 28)
             }
         }
         .sheet(isPresented: $isShowingHistory) {
@@ -85,10 +124,17 @@ struct CameraCaptureView: View {
             processor.delegate = CaptureCoordinator.shared
             CaptureCoordinator.shared.configure(processor: processor, locationProvider: locationProvider)
             locationProvider.requestWhenInUseAuthorization()
-            processor.start()
         }
         .onDisappear {
             processor.stop()
+        }
+    }
+
+    private func toggleRecognition() {
+        if processor.isRecognizing {
+            processor.stop()
+        } else {
+            processor.start()
         }
     }
 
