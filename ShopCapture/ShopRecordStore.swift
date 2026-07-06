@@ -6,6 +6,8 @@ struct CapturedShopPayload {
     let image: UIImage
     let fullText: String
     let phoneNumber: String
+    let shopName: String?
+    let serviceContent: String?
     let latitude: Double
     let longitude: Double
     let timestamp: Date
@@ -22,6 +24,8 @@ enum ShopRecordStore {
             record.setValue(id, forKey: "id")
             record.setValue(payload.fullText, forKey: "fullText")
             record.setValue(payload.phoneNumber, forKey: "phoneNumber")
+            record.setValue(payload.shopName, forKey: "shopName")
+            record.setValue(payload.serviceContent, forKey: "serviceContent")
             record.setValue(imageURL.path, forKey: "imagePath")
             record.setValue(payload.latitude, forKey: "latitude")
             record.setValue(payload.longitude, forKey: "longitude")

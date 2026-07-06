@@ -43,11 +43,11 @@ private struct HistoryRow: View {
             RecordThumbnail(path: record.imagePath)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(record.phoneNumber ?? "无号码")
+                Text(record.shopName?.isEmpty == false ? record.shopName ?? "" : record.phoneNumber ?? "无号码")
                     .font(.headline)
                     .lineLimit(1)
 
-                Text(shortText)
+                Text(subtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -60,6 +60,18 @@ private struct HistoryRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var subtitle: String {
+        if let serviceContent = record.serviceContent, !serviceContent.isEmpty {
+            return serviceContent
+        }
+
+        if let phoneNumber = record.phoneNumber, !phoneNumber.isEmpty {
+            return phoneNumber
+        }
+
+        return shortText
     }
 
     private var shortText: String {

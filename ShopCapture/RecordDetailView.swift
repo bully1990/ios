@@ -19,8 +19,15 @@ struct RecordDetailView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Label(record.phoneNumber ?? "无号码", systemImage: "phone")
+                    Label(record.shopName?.isEmpty == false ? record.shopName ?? "" : "未整理出名称", systemImage: "storefront")
                         .font(.headline)
+
+                    Label(record.serviceContent?.isEmpty == false ? record.serviceContent ?? "" : "未整理出服务内容", systemImage: "text.badge.checkmark")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Label(record.phoneNumber ?? "无号码", systemImage: "phone")
+                        .font(.subheadline)
 
                     Label(String(format: "纬度 %.8f，经度 %.8f", record.latitude, record.longitude), systemImage: "location")
                         .font(.subheadline)

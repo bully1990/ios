@@ -136,10 +136,14 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
 
         Task {
             let location = await locationProvider?.currentLocation(timeout: 3)
+            let summary = await summarize(frame: frame, processor: processor)
+            processor.setMessage("正在保存")
             let payload = CapturedShopPayload(
                 image: frame.image,
                 fullText: frame.fullText,
                 phoneNumber: frame.phoneNumber,
+                shopName: summary?.shopName,
+                serviceContent: summary?.serviceContent,
                 latitude: location?.coordinate.latitude ?? 0.0,
                 longitude: location?.coordinate.longitude ?? 0.0,
                 timestamp: Date()
@@ -153,6 +157,18 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
                 isSaving = false
                 processor.markSaveFailed(error)
             }
+        }
+    }
+
+    private func summarize(frame: DetectedShopFrame, processor: CameraFrameProcessor) async -> ShopTextSummary? {
+        processor.setMessage("正在整理名称和服务")
+
+        do {
+            return try await DeepSeekClient.summarize(fullText: frame.fullText, phoneNumber: frame.phoneNumber)
+        } catch {
+            print("Warning: DeepSeek summary failed: \(error.localizedDescription)")
+            processor.setMessage("整理失败，继续保存")
+            return nil
         }
     }
 
