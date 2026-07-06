@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -6,7 +5,7 @@ struct CameraCaptureView: View {
     @StateObject private var processor = CameraFrameProcessor()
     @EnvironmentObject private var locationProvider: LocationProvider
     @State private var isShowingHistory = false
-    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var isShowingPhotoPicker = false
 
     var body: some View {
         ZStack {
@@ -27,7 +26,9 @@ struct CameraCaptureView: View {
 
             VStack {
                 HStack {
-                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    Button {
+                        isShowingPhotoPicker = true
+                    } label: {
                         Image(systemName: "photo.on.rectangle")
                             .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(.white)
@@ -73,6 +74,13 @@ struct CameraCaptureView: View {
                 HistoryView()
             }
         }
+        .sheet(isPresented: $isShowingPhotoPicker) {
+            PhotoLibraryPicker { image in
+                Task {
+                    await importPhoto(image)
+                }
+            }
+        }
         .onAppear {
             processor.delegate = CaptureCoordinator.shared
             CaptureCoordinator.shared.configure(processor: processor, locationProvider: locationProvider)
@@ -82,27 +90,11 @@ struct CameraCaptureView: View {
         .onDisappear {
             processor.stop()
         }
-        .onChange(of: selectedPhoto?.itemIdentifier) { _, _ in
-            guard let item = selectedPhoto else {
-                return
-            }
-
-            Task {
-                await importPhoto(item)
-                selectedPhoto = nil
-            }
-        }
     }
 
-    private func importPhoto(_ item: PhotosPickerItem) async {
+    private func importPhoto(_ image: UIImage) async {
         do {
             processor.setMessage("正在识别相册图片")
-
-            guard let data = try await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else {
-                processor.setMessage("图片读取失败")
-                return
-            }
 
             guard let frame = try await ImageTextRecognizer.detectShopFrame(in: image) else {
                 processor.setMessage("未识别到电话号码")

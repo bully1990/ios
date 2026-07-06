@@ -26,6 +26,8 @@
 	<string>用于实时识别门头文字并在检测到电话号码时自动抓拍。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于在自动抓拍门头信息时记录当前位置坐标。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于从相册选择门头图片并识别电话号码。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
