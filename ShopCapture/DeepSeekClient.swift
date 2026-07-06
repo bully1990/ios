@@ -21,16 +21,24 @@ enum ShopTextSummarizer {
         let shopName = detectedName ?? fallbackName(from: services)
         let result = ShopTextSummary(shopName: shopName, serviceContent: services)
 
-        return result.hasUsefulContent ? result : nil
+        return refine(result, fullText: fullText)
     }
 
     static func ensureName(_ summary: ShopTextSummary?) -> ShopTextSummary? {
+        refine(summary, fullText: nil)
+    }
+
+    static func refine(_ summary: ShopTextSummary?, fullText: String?) -> ShopTextSummary? {
         guard let summary else {
             return nil
         }
 
-        let shopName = summary.shopName ?? fallbackName(from: summary.serviceContent)
-        let result = ShopTextSummary(shopName: shopName, serviceContent: summary.serviceContent)
+        let serviceContent = canonicalized(summary.serviceContent)
+        let combinedText = [summary.shopName, serviceContent, fullText]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+        let shopName = correctedShopName(from: combinedText) ?? summary.shopName ?? fallbackName(from: serviceContent)
+        let result = ShopTextSummary(shopName: shopName, serviceContent: serviceContent)
 
         return result.hasUsefulContent ? result : nil
     }
@@ -135,6 +143,26 @@ enum ShopTextSummarizer {
 
         return String(compact.prefix(8))
     }
+
+    private static func correctedShopName(from text: String) -> String? {
+        if text.contains("木桶饭") || text.contains("本桶饭") || text.contains("木桶钣") {
+            return "木桶饭"
+        }
+
+        return nil
+    }
+
+    private static func canonicalized(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        let canonical = value
+            .replacingOccurrences(of: "本桶饭", with: "木桶饭")
+            .replacingOccurrences(of: "木桶钣", with: "木桶饭")
+
+        return canonical.isEmpty ? nil : canonical
+    }
 }
 
 enum DeepSeekClient {
@@ -171,7 +199,7 @@ enum DeepSeekClient {
             serviceContent: cleaned(summary.services)
         )
 
-        return ShopTextSummarizer.ensureName(result)
+        return ShopTextSummarizer.refine(result, fullText: fullText)
     }
 
     private static func configuredAPIKey() -> String {
@@ -186,6 +214,8 @@ enum DeepSeekClient {
     private static func makeRequestBody(fullText: String, phoneNumber: String) -> ChatCompletionRequest {
         let prompt = """
         你是一个门头照片 OCR 文本整理助手。请只根据给定 OCR 文本提取信息，不要编造。
+        如果 OCR 里有多个相邻店铺招牌，优先选择与电话号码和服务内容在同一门头区域的主招牌名称，不要选择旁边相邻店铺名称。
+        餐饮门头中，"木桶饭"、"湘菜"、"小炒"、"外卖"等服务词如果与电话同区域，店名优先取大字主招牌，例如"木桶饭"。
         输出严格 JSON，不要 Markdown，不要解释。
         JSON 字段：
         - name: 店铺/公司/门头名称，无法判断则为空字符串

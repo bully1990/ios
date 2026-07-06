@@ -51,4 +51,15 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(summary?.shopName, "钣金切割加工")
         XCTAssertEqual(summary?.serviceContent, "钣金剪折弯 激光切割加工；铁板 冷轧板 机箱订做 焊接加工")
     }
+
+    func testSummaryCorrectsNeighborSignNameForWoodenBucketRice() {
+        let summary = ShopTextSummary(
+            shopName: "辛草",
+            serviceContent: "棋牌、特色小炒、本桶饭、正宗湘菜、小锅爆炒、外卖"
+        )
+
+        let refined = ShopTextSummarizer.refine(summary, fullText: "外卖电话:18566583508\n木桶饭")
+        XCTAssertEqual(refined?.shopName, "木桶饭")
+        XCTAssertEqual(refined?.serviceContent, "棋牌、特色小炒、木桶饭、正宗湘菜、小锅爆炒、外卖")
+    }
 }
