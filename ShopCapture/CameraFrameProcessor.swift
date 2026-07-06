@@ -48,6 +48,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var stablePhoneNumber: String?
     private var stableCount = 0
     private var lastCaptureTime = Date.distantPast
+    private var currentImageOrientation: CGImagePropertyOrientation = .right
 
     func start() {
         Task { @MainActor in
@@ -102,6 +103,14 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                 self.session.stopRunning()
             }
         }
+    }
+
+    func updateOrientation(_ deviceOrientation: UIDeviceOrientation) {
+        guard let imageOrientation = CGImagePropertyOrientation(deviceOrientation: deviceOrientation) else {
+            return
+        }
+
+        currentImageOrientation = imageOrientation
     }
 
     func markSaveCompleted() {
@@ -219,6 +228,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                 return
             }
 
+            let imageOrientation = currentImageOrientation
             let request = VNRecognizeTextRequest { [weak self] request, error in
                 guard let self else { return }
                 defer { self.isVisionBusy = false }
@@ -228,7 +238,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                     return
                 }
 
-                self.handleVisionResults(request.results, pixelBuffer: pixelBuffer)
+                self.handleVisionResults(request.results, pixelBuffer: pixelBuffer, orientation: imageOrientation)
             }
 
             request.recognitionLevel = .fast
@@ -236,7 +246,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             request.regionOfInterest = CGRect(x: 0.2, y: 0.2, width: 0.6, height: 0.6)
             request.recognitionLanguages = ["zh-Hans", "en-US"]
 
-            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .right, options: [:])
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: imageOrientation, options: [:])
 
             do {
                 try handler.perform([request])
@@ -247,7 +257,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         }
     }
 
-    private func handleVisionResults(_ results: [VNObservation]?, pixelBuffer: CVPixelBuffer) {
+    private func handleVisionResults(_ results: [VNObservation]?, pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) {
         guard let observations = results as? [VNRecognizedTextObservation] else {
             resetStability()
             return
@@ -283,7 +293,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             return
         }
 
-        guard let image = makeUIImage(from: pixelBuffer) else {
+        guard let image = makeUIImage(from: pixelBuffer, orientation: orientation) else {
             resetStability()
             return
         }
@@ -304,8 +314,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         stableCount = 0
     }
 
-    private func makeUIImage(from pixelBuffer: CVPixelBuffer) -> UIImage? {
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
+    private func makeUIImage(from pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) -> UIImage? {
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
         guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
             return nil
         }
@@ -316,5 +326,22 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 extension CameraFrameProcessor: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         process(sampleBuffer: sampleBuffer)
+    }
+}
+
+private extension CGImagePropertyOrientation {
+    init?(deviceOrientation: UIDeviceOrientation) {
+        switch deviceOrientation {
+        case .portrait:
+            self = .right
+        case .portraitUpsideDown:
+            self = .left
+        case .landscapeLeft:
+            self = .up
+        case .landscapeRight:
+            self = .down
+        default:
+            return nil
+        }
     }
 }

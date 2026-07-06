@@ -6,10 +6,11 @@ struct CameraCaptureView: View {
     @EnvironmentObject private var locationProvider: LocationProvider
     @State private var isShowingHistory = false
     @State private var isShowingPhotoPicker = false
+    @State private var deviceOrientation: UIDeviceOrientation = .portrait
 
     var body: some View {
         ZStack {
-            CameraPreviewView(session: processor.session)
+            CameraPreviewView(session: processor.session, deviceOrientation: deviceOrientation)
                 .ignoresSafeArea()
 
             GeometryReader { proxy in
@@ -121,13 +122,28 @@ struct CameraCaptureView: View {
             }
         }
         .onAppear {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            updateDeviceOrientation(UIDevice.current.orientation)
             processor.delegate = CaptureCoordinator.shared
             CaptureCoordinator.shared.configure(processor: processor, locationProvider: locationProvider)
             locationProvider.requestWhenInUseAuthorization()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            updateDeviceOrientation(UIDevice.current.orientation)
+        }
         .onDisappear {
             processor.stop()
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
+    }
+
+    private func updateDeviceOrientation(_ orientation: UIDeviceOrientation) {
+        guard orientation.isUsableCameraOrientation else {
+            return
+        }
+
+        deviceOrientation = orientation
+        processor.updateOrientation(orientation)
     }
 
     private func toggleRecognition() {
@@ -152,6 +168,17 @@ struct CameraCaptureView: View {
         } catch {
             print("Warning: failed to import photo: \(error.localizedDescription)")
             processor.setMessage("相册识别失败")
+        }
+    }
+}
+
+private extension UIDeviceOrientation {
+    var isUsableCameraOrientation: Bool {
+        switch self {
+        case .portrait, .portraitUpsideDown, .landscapeLeft, .landscapeRight:
+            return true
+        default:
+            return false
         }
     }
 }
