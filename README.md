@@ -26,16 +26,8 @@ SwiftUI + AVFoundation + Vision + CoreLocation + Core Data 的本地实时门头
 
 仓库已添加 `.github/workflows/ios-build.yml`：
 
-- 推送到 `main`/`master` 或提交 Pull Request 时，会在 macOS runner 上执行未签名的 iOS Simulator Release 构建，并上传 `ShopCapture-simulator-app.zip` artifact。
-- 推送到 `main`/`master` 时，还会构建未签名的真机 IPA，并上传 `ShopCapture-unsigned-ipa` artifact。这个 IPA 通常不能直接安装到真机，需要后续重签名。
-- 在 GitHub Actions 页面手动运行 `Build iOS App`，并勾选 `build_signed_ipa` 时，还会尝试执行真机归档并导出 `ShopCapture-ipa` artifact。
+- 推送到 `main`/`master` 或手动运行 workflow 时，会在 macOS runner 上构建未签名的真机 IPA。
+- 构建成功后，在 GitHub Actions run 的 Artifacts 中下载 `ShopCapture-unsigned-ipa`。
+- 这个 IPA 通常不能直接安装到真机，需要后续重签名。
 
-导出 IPA 前，需要先在仓库的 `Settings -> Secrets and variables -> Actions` 中配置这些 secrets：
-
-- `BUILD_CERTIFICATE_BASE64`：`.p12` 证书文件的 Base64 内容
-- `P12_PASSWORD`：导出 `.p12` 时设置的密码
-- `BUILD_PROVISION_PROFILE_BASE64`：`.mobileprovision` 描述文件的 Base64 内容
-- `KEYCHAIN_PASSWORD`：CI 临时 keychain 密码
-- `DEVELOPMENT_TEAM`：Apple Developer Team ID
-
-本项目当前 Bundle Identifier 是 `com.bully1990.shopcapture`。如果要导出可安装到设备或提交商店的 IPA，需要在 Apple Developer 后台使用同一个 Bundle Identifier 创建 App ID、证书和描述文件。
+本项目当前 Bundle Identifier 是 `com.bully1990.shopcapture`。

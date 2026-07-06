@@ -82,8 +82,8 @@ struct CameraCaptureView: View {
         .onDisappear {
             processor.stop()
         }
-        .onChange(of: selectedPhoto) { _, item in
-            guard let item else {
+        .onChange(of: selectedPhoto?.itemIdentifier) { _, _ in
+            guard let item = selectedPhoto else {
                 return
             }
 

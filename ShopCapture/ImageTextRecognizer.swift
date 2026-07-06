@@ -2,12 +2,25 @@ import UIKit
 import Vision
 
 enum ImageTextRecognizer {
+    struct Result {
+        let fullText: String
+        let phoneNumber: String
+    }
+
     static func detectShopFrame(in image: UIImage) async throws -> DetectedShopFrame? {
         guard let cgImage = image.normalizedForRecognition().cgImage else {
             return nil
         }
 
-        return try await Task.detached(priority: .userInitiated) {
+        guard let result = try await recognizeText(in: cgImage) else {
+            return nil
+        }
+
+        return DetectedShopFrame(image: image, fullText: result.fullText, phoneNumber: result.phoneNumber)
+    }
+
+    private static func recognizeText(in cgImage: CGImage) async throws -> Result? {
+        try await Task.detached(priority: .userInitiated) {
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = false
@@ -25,7 +38,7 @@ enum ImageTextRecognizer {
                 return nil
             }
 
-            return DetectedShopFrame(image: image, fullText: fullText, phoneNumber: phoneNumber)
+            return Result(fullText: fullText, phoneNumber: phoneNumber)
         }.value
     }
 }
