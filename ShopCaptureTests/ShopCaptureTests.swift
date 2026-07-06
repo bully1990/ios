@@ -52,4 +52,39 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(summary?.serviceContent, "钣金剪折弯 激光切割加工；铁板 冷轧板 机箱订做 焊接加工")
     }
 
+    func testOCRContextPrioritizesTextWithSameBackgroundAsPhoneLine() {
+        let signColor = OCRBackgroundColor(red: 0.9, green: 0.7, blue: 0.2)
+        let neighborColor = OCRBackgroundColor(red: 0.2, green: 0.7, blue: 0.9)
+        let lines = [
+            OCRTextLine(text: "隔壁店", boundingBox: CGRect(x: 0.05, y: 0.7, width: 0.2, height: 0.1), backgroundColor: neighborColor),
+            OCRTextLine(text: "主招牌", boundingBox: CGRect(x: 0.42, y: 0.68, width: 0.25, height: 0.1), backgroundColor: signColor),
+            OCRTextLine(text: "特色小炒 外卖", boundingBox: CGRect(x: 0.4, y: 0.52, width: 0.35, height: 0.08), backgroundColor: signColor),
+            OCRTextLine(text: "电话:13800138000", boundingBox: CGRect(x: 0.42, y: 0.38, width: 0.35, height: 0.08), backgroundColor: signColor)
+        ]
+
+        let text = OCRTextContextBuilder.prioritizedText(from: lines, phoneNumber: "13800138000")
+
+        XCTAssertTrue(text.contains("同背景候选区域"))
+        XCTAssertTrue(text.contains("主招牌\n特色小炒 外卖\n电话:13800138000"))
+        XCTAssertFalse(text.components(separatedBy: "全部OCR文本").first?.contains("隔壁店") ?? true)
+    }
+
+    func testLocalSummaryPrefersSameBackgroundSectionWhenPresent() {
+        let text = """
+        同背景候选区域（优先参考，与电话行背景颜色接近）:
+        主招牌
+        特色小炒 外卖
+        电话:13800138000
+
+        全部OCR文本:
+        隔壁店
+        主招牌
+        特色小炒 外卖
+        电话:13800138000
+        """
+
+        let summary = ShopTextSummarizer.summarizeLocally(fullText: text, phoneNumber: "13800138000")
+        XCTAssertEqual(summary?.shopName, "主招牌")
+    }
+
 }

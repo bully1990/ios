@@ -269,10 +269,9 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             return
         }
 
-        let lines = observations.compactMap { observation in
-            observation.topCandidates(1).first?.string
-        }
-        let fullText = lines.joined(separator: "\n")
+        let image = makeUIImage(from: pixelBuffer, orientation: orientation)
+        let textLines = OCRTextContextBuilder.lines(from: observations, image: image)
+        let fullText = textLines.map(\.text).joined(separator: "\n")
 
         guard let phoneNumber = PhoneNumberExtractor.firstPhoneNumber(in: fullText) else {
             resetStability()
@@ -299,7 +298,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             return
         }
 
-        guard let image = makeUIImage(from: pixelBuffer, orientation: orientation) else {
+        guard let image else {
             resetStability()
             return
         }
@@ -307,7 +306,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         lastCaptureTime = now
         state = .detecting
 
-        let detectedFrame = DetectedShopFrame(image: image, fullText: fullText, phoneNumber: phoneNumber)
+        let prioritizedText = OCRTextContextBuilder.prioritizedText(from: textLines, phoneNumber: phoneNumber)
+        let detectedFrame = DetectedShopFrame(image: image, fullText: prioritizedText, phoneNumber: phoneNumber)
 
         Task { @MainActor in
             message = "正在保存"

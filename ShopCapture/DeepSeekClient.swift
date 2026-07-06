@@ -11,7 +11,8 @@ struct ShopTextSummary {
 
 enum ShopTextSummarizer {
     static func summarizeLocally(fullText: String, phoneNumber: String) -> ShopTextSummary? {
-        let lines = normalizedLines(from: fullText)
+        let focusedText = focusedText(from: fullText) ?? fullText
+        let lines = normalizedLines(from: focusedText)
         guard !lines.isEmpty else {
             return nil
         }
@@ -52,6 +53,26 @@ enum ShopTextSummarizer {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }
             .filter { !$0.isEmpty }
+    }
+
+    private static func focusedText(from text: String) -> String? {
+        guard let markerRange = text.range(of: "同背景候选区域") else {
+            return nil
+        }
+
+        let afterMarker = text[markerRange.upperBound...]
+        let sectionBody = afterMarker
+            .components(separatedBy: "全部OCR文本")
+            .first?
+            .replacingOccurrences(of: "（优先参考，与电话行背景颜色接近）:", with: "")
+            .replacingOccurrences(of: ":", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let sectionBody, !sectionBody.isEmpty else {
+            return nil
+        }
+
+        return sectionBody
     }
 
     private static func candidateName(from lines: [String], phoneNumber: String) -> String? {
@@ -193,6 +214,7 @@ enum DeepSeekClient {
         let prompt = """
         你是一个门头照片 OCR 文本整理助手。请只根据给定 OCR 文本提取信息，不要编造。
         如果 OCR 里有多个相邻店铺招牌，优先选择与电话号码和服务内容在同一门头区域的主招牌名称，不要选择旁边相邻店铺名称。
+        如果 OCR 文本包含“同背景候选区域”，说明这些文字背后的招牌颜色与电话行更接近，请优先从该区域判断店名和服务内容。
         餐饮门头中，如果服务词与电话同区域，店名优先取该区域的大字主招牌。
         输出严格 JSON，不要 Markdown，不要解释。
         JSON 字段：
