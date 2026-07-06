@@ -49,6 +49,25 @@ enum ShopRecordStore {
         try deleteImage(at: imagePath)
     }
 
+    @MainActor
+    static func update(
+        _ record: ShopRecord,
+        shopName: String?,
+        serviceContent: String?,
+        phoneNumber: String?,
+        fullText: String?,
+        context: NSManagedObjectContext
+    ) throws {
+        record.setValue(cleaned(shopName), forKey: "shopName")
+        record.setValue(cleaned(serviceContent), forKey: "serviceContent")
+        record.setValue(cleaned(phoneNumber), forKey: "phoneNumber")
+        record.setValue(cleaned(fullText), forKey: "fullText")
+
+        if context.hasChanges {
+            try context.save()
+        }
+    }
+
     private static func writeImage(_ image: UIImage, id: UUID) throws -> URL {
         guard let jpegData = image.jpegData(compressionQuality: 0.8) else {
             throw CocoaError(.fileWriteUnknown)
@@ -90,5 +109,10 @@ enum ShopRecordStore {
         }
 
         try FileManager.default.removeItem(atPath: path)
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

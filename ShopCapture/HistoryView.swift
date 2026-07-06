@@ -28,10 +28,6 @@ struct HistoryView: View {
         }
         .navigationTitle("历史记录")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                EditButton()
-            }
-
             ToolbarItem(placement: .topBarTrailing) {
                 Button("关闭") {
                     dismiss()
