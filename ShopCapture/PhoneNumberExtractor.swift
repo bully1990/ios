@@ -3,7 +3,7 @@ import Foundation
 enum PhoneNumberExtractor {
     private static let separatorPattern = #"[\s\-–—－·.]*"#
     private static let mobilePattern = #"(?<!\d)1"# + separatorPattern + #"[3-9]"# + separatorPattern + #"\d(?:"# + separatorPattern + #"\d){8}(?!\d)"#
-    private static let landlinePattern = #"(?<!\d)(?:0\d{2,3}"# + separatorPattern + #")?\d{7,8}(?:"# + separatorPattern + #"(?:转|ext\.?|#)"# + separatorPattern + #"\d{1,6})?(?!\d)"#
+    private static let landlinePattern = #"(?<!\d)0\d{2,3}"# + separatorPattern + #"\d{7,8}(?:"# + separatorPattern + #"(?:转|ext\.?|#)"# + separatorPattern + #"\d{1,6})?(?!\d)"#
 
     static func firstPhoneNumber(in text: String) -> String? {
         let normalized = normalizeOCRText(text)
@@ -22,13 +22,18 @@ enum PhoneNumberExtractor {
 
             let candidate = String(normalized[swiftRange].filter(\.isNumber))
 
-            if isPlausible(candidate) {
+            if pattern == landlinePattern,
+               !hasPhoneContext(near: match.range, in: normalized) {
+                continue
+            }
+
+            if isPlausible(candidate, allowsLandline: pattern == landlinePattern) {
                 return candidate
             }
         }
 
         for candidate in numericRuns(in: normalized) {
-            if isPlausible(candidate) {
+            if isPlausible(candidate, allowsLandline: false) {
                 return candidate
             }
         }
@@ -88,14 +93,25 @@ enum PhoneNumberExtractor {
         character.isWhitespace || "-–—－·.()（）:：".contains(character)
     }
 
-    private static func isPlausible(_ candidate: String) -> Bool {
+    private static func hasPhoneContext(near range: NSRange, in text: String) -> Bool {
+        let nsText = text as NSString
+        let lineRange = nsText.lineRange(for: range)
+        let line = nsText.substring(with: lineRange)
+        let keywords = ["电话", "联系", "热线", "手机", "座机", "订餐", "外卖", "客服", "咨询"]
+        return keywords.contains { line.contains($0) }
+    }
+
+    private static func isPlausible(_ candidate: String, allowsLandline: Bool) -> Bool {
         let digits = candidate.filter(\.isNumber)
 
-        if digits.count == 11, digits.hasPrefix("1") {
+        if digits.count == 11,
+           digits.hasPrefix("1"),
+           let secondDigit = digits.dropFirst().first,
+           "3456789".contains(secondDigit) {
             return true
         }
 
-        if digits.count >= 7, digits.count <= 13 {
+        if allowsLandline, digits.hasPrefix("0"), digits.count >= 10, digits.count <= 13 {
             return true
         }
 

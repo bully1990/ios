@@ -65,14 +65,16 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var cameraDevice: AVCaptureDevice?
     private var latestPixelBuffer: CVPixelBuffer?
     private var latestImageOrientation: CGImagePropertyOrientation = .right
+    private var isAutomaticDetectionEnabled = false
 
-    func start() {
+    func start(automaticDetection: Bool) {
         latestPixelBuffer = nil
         resetStability()
+        isAutomaticDetectionEnabled = automaticDetection
 
         Task { @MainActor in
             self.isRecognizing = true
-            self.message = "正在开启识别"
+            self.message = "正在开启摄像头"
         }
 
         requestAccessIfNeeded { [weak self] granted in
@@ -102,7 +104,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
                 Task { @MainActor in
                     self.isRecognizing = true
-                    self.message = "正在识别门头"
+                    self.message = automaticDetection ? "正在自动识别门头" : "请调整画面后拍照识别"
                 }
             }
         }
@@ -112,6 +114,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         resetStability()
         state = .idle
         latestPixelBuffer = nil
+        isAutomaticDetectionEnabled = false
 
         Task { @MainActor in
             self.isRecognizing = false
@@ -307,6 +310,10 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
         latestPixelBuffer = pixelBuffer
         latestImageOrientation = currentImageOrientation
+
+        guard isAutomaticDetectionEnabled else {
+            return
+        }
 
         guard frameIndex % Constants.frameProcessingInterval == 0 else {
             return

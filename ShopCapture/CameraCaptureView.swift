@@ -2,6 +2,31 @@ import SwiftUI
 import UIKit
 
 struct CameraCaptureView: View {
+    private enum RecognitionMode: String, CaseIterable, Identifiable {
+        case manual = "拍照识别"
+        case automatic = "自动识别"
+
+        var id: String { rawValue }
+
+        var startTitle: String {
+            switch self {
+            case .manual:
+                return "开启相机"
+            case .automatic:
+                return "开始自动识别"
+            }
+        }
+
+        var hint: String {
+            switch self {
+            case .manual:
+                return "默认拍照识别：调整画面后手动拍照保存"
+            case .automatic:
+                return "自动识别：扫到电话号码后自动保存"
+            }
+        }
+    }
+
     @StateObject private var processor = CameraFrameProcessor()
     @EnvironmentObject private var locationProvider: LocationProvider
     @State private var isShowingHistory = false
@@ -10,6 +35,7 @@ struct CameraCaptureView: View {
     @State private var previewOffset: CGSize = .zero
     @State private var committedPreviewOffset: CGSize = .zero
     @State private var gestureStartZoom: CGFloat?
+    @State private var recognitionMode: RecognitionMode = .manual
 
     var body: some View {
         ZStack {
@@ -38,7 +64,7 @@ struct CameraCaptureView: View {
                         .font(.system(size: 42, weight: .semibold))
                         .foregroundStyle(.white)
 
-                    Text("点击开始识别后开启摄像头")
+                    Text("选择模式后开启摄像头")
                         .font(.headline)
                         .foregroundStyle(.white)
 
@@ -46,7 +72,7 @@ struct CameraCaptureView: View {
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.78))
 
-                    Text("开启后可双指缩放、拖动画面，或点拍照识别")
+                    Text(recognitionMode.hint)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.68))
                 }
@@ -102,25 +128,51 @@ struct CameraCaptureView: View {
                             .clipShape(Capsule())
                     }
 
-                    if processor.isRecognizing {
-                        HStack(spacing: 12) {
-                            Button {
-                                processor.captureCurrentFrame()
-                            } label: {
-                                Label("拍照识别", systemImage: "camera.fill")
-                                    .font(.headline.weight(.semibold))
-                                    .foregroundStyle(.black)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 15)
-                                    .background(.white.opacity(0.95))
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            }
-                            .accessibilityLabel("拍照识别")
+                    Picker("识别模式", selection: $recognitionMode) {
+                        ForEach(RecognitionMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(processor.isRecognizing)
+                    .padding(4)
+                    .background(.black.opacity(0.36))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
+                    if processor.isRecognizing {
+                        if recognitionMode == .manual {
+                            HStack(spacing: 12) {
+                                Button {
+                                    processor.captureCurrentFrame()
+                                } label: {
+                                    Label("拍照识别", systemImage: "camera.fill")
+                                        .font(.headline.weight(.semibold))
+                                        .foregroundStyle(.black)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 15)
+                                        .background(.white.opacity(0.95))
+                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                }
+                                .accessibilityLabel("拍照识别")
+
+                                Button {
+                                    toggleRecognition()
+                                } label: {
+                                    Label("停止", systemImage: "stop.fill")
+                                        .font(.headline.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 15)
+                                        .background(.red.opacity(0.9))
+                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                }
+                                .accessibilityLabel("停止识别")
+                            }
+                        } else {
                             Button {
                                 toggleRecognition()
                             } label: {
-                                Label("停止", systemImage: "stop.fill")
+                                Label("停止自动识别", systemImage: "stop.fill")
                                     .font(.headline.weight(.semibold))
                                     .foregroundStyle(.white)
                                     .frame(maxWidth: .infinity)
@@ -128,13 +180,13 @@ struct CameraCaptureView: View {
                                     .background(.red.opacity(0.9))
                                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                             }
-                            .accessibilityLabel("停止识别")
+                            .accessibilityLabel("停止自动识别")
                         }
                     } else {
                         Button {
                             toggleRecognition()
                         } label: {
-                            Label("开始识别", systemImage: "camera.viewfinder")
+                            Label(recognitionMode.startTitle, systemImage: recognitionMode == .manual ? "camera.fill" : "camera.viewfinder")
                                 .font(.headline.weight(.semibold))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
@@ -143,7 +195,7 @@ struct CameraCaptureView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                                 .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
                         }
-                        .accessibilityLabel("开始识别")
+                        .accessibilityLabel(recognitionMode.startTitle)
                     }
 
                     if processor.isRecognizing {
@@ -213,7 +265,7 @@ struct CameraCaptureView: View {
         if processor.isRecognizing {
             processor.stop()
         } else {
-            processor.start()
+            processor.start(automaticDetection: recognitionMode == .automatic)
         }
     }
 

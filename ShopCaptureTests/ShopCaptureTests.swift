@@ -26,6 +26,16 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertNil(PhoneNumberExtractor.firstPhoneNumber(in: "营业时间 09:00-18:00"))
     }
 
+    func testRejectsComputerScreenNumberWithoutValidPhonePrefix() {
+        let text = """
+        您是对重疾险有什么偏见吗
+        038008490848
+        未整理出服务内容
+        """
+
+        XCTAssertNil(PhoneNumberExtractor.firstPhoneNumber(in: text))
+    }
+
     func testLocalSummaryExtractsTrailingShopNameAndServices() {
         let text = """
         钣金剪折弯 激光切割加工
