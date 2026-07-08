@@ -61,7 +61,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var stableCount = 0
     private var lastCaptureTime = Date.distantPast
     private var currentImageOrientation: CGImagePropertyOrientation = .up
-    private var currentVideoOrientation: AVCaptureVideoOrientation = .portrait
+    private var currentVideoRotationAngle: CGFloat = 90
     private var cameraDevice: AVCaptureDevice?
     private var videoOutput: AVCaptureVideoDataOutput?
     private var latestPixelBuffer: CVPixelBuffer?
@@ -215,20 +215,20 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     }
 
     func updateOrientation(_ deviceOrientation: UIDeviceOrientation) {
-        guard let videoOrientation = AVCaptureVideoOrientation(deviceOrientation: deviceOrientation) else {
+        guard let videoRotationAngle = videoRotationAngle(for: deviceOrientation) else {
             return
         }
 
         currentImageOrientation = .up
-        currentVideoOrientation = videoOrientation
+        currentVideoRotationAngle = videoRotationAngle
 
         sessionQueue.async { [weak self] in
             guard let connection = self?.videoOutput?.connection(with: .video),
-                  connection.isVideoOrientationSupported else {
+                  connection.isVideoRotationAngleSupported(videoRotationAngle) else {
                 return
             }
 
-            connection.videoOrientation = videoOrientation
+            connection.videoRotationAngle = videoRotationAngle
         }
     }
 
@@ -320,8 +320,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         }
 
         if let connection = output.connection(with: .video) {
-            if connection.isVideoOrientationSupported {
-                connection.videoOrientation = currentVideoOrientation
+            if connection.isVideoRotationAngleSupported(currentVideoRotationAngle) {
+                connection.videoRotationAngle = currentVideoRotationAngle
             }
             if connection.isVideoMirroringSupported {
                 connection.isVideoMirrored = false
@@ -605,19 +605,17 @@ extension CameraFrameProcessor: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 }
 
-private extension AVCaptureVideoOrientation {
-    init?(deviceOrientation: UIDeviceOrientation) {
+private func videoRotationAngle(for deviceOrientation: UIDeviceOrientation) -> CGFloat? {
         switch deviceOrientation {
         case .portrait:
-            self = .portrait
+            90
         case .portraitUpsideDown:
-            self = .portraitUpsideDown
+            270
         case .landscapeLeft:
-            self = .landscapeRight
+            0
         case .landscapeRight:
-            self = .landscapeLeft
+            180
         default:
-            return nil
+            nil
         }
-    }
 }

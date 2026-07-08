@@ -43,13 +43,13 @@ final class PreviewUIView: UIView {
     }
 
     func updateOrientation(_ deviceOrientation: UIDeviceOrientation) {
-        guard let videoOrientation = AVCaptureVideoOrientation(deviceOrientation: deviceOrientation),
+        guard let videoRotationAngle = videoRotationAngle(for: deviceOrientation),
               let connection = videoPreviewLayer.connection,
-              connection.isVideoOrientationSupported else {
+              connection.isVideoRotationAngleSupported(videoRotationAngle) else {
             return
         }
 
-        connection.videoOrientation = videoOrientation
+        connection.videoRotationAngle = videoRotationAngle
         publishCaptureRegion()
     }
 
@@ -73,19 +73,17 @@ final class PreviewUIView: UIView {
     }
 }
 
-private extension AVCaptureVideoOrientation {
-    init?(deviceOrientation: UIDeviceOrientation) {
+private func videoRotationAngle(for deviceOrientation: UIDeviceOrientation) -> CGFloat? {
         switch deviceOrientation {
         case .portrait:
-            self = .portrait
+            90
         case .portraitUpsideDown:
-            self = .portraitUpsideDown
+            270
         case .landscapeLeft:
-            self = .landscapeRight
+            0
         case .landscapeRight:
-            self = .landscapeLeft
+            180
         default:
-            return nil
+            nil
         }
-    }
 }
