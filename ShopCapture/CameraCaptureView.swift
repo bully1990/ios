@@ -299,7 +299,7 @@ struct CameraCaptureView: View {
     }
 
     private var controlBottomPadding: CGFloat {
-        isLandscapeLayout ? 10 : 28
+        isLandscapeLayout ? 0 : 28
     }
 
     private var actionButtonFont: Font {
@@ -311,7 +311,7 @@ struct CameraCaptureView: View {
     }
 
     private var actionButtonVerticalPadding: CGFloat {
-        isLandscapeLayout ? 10 : 15
+        isLandscapeLayout ? 8 : 15
     }
 
     private var actionButtonCornerRadius: CGFloat {
