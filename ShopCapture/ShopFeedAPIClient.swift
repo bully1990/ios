@@ -228,7 +228,7 @@ struct FeedShop: Identifiable, Sendable {
     let imageURL: String
     let distanceMeters: Double
 
-    init(record: ShopCaptureRecord, latitude: Double?, longitude: Double?) {
+    fileprivate init(record: ShopCaptureRecord, latitude: Double?, longitude: Double?) {
         let serviceText = record.serviceContent.value.isEmpty ? record.fullText.value : record.serviceContent.value
         let service = ShopFeedAPIClient.primaryService(text: serviceText)
         let distance = Self.distanceMeters(
