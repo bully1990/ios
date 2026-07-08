@@ -53,7 +53,7 @@ final class PreviewUIView: UIView {
         publishCaptureRegion()
     }
 
-    func updateGuideLayerRect(_ rect: CGRect, onChange: (CGRect) -> Void) {
+    func updateGuideLayerRect(_ rect: CGRect, onChange: @escaping (CGRect) -> Void) {
         onCaptureRegionChange = onChange
 
         guard rect.width > 0, rect.height > 0 else {
