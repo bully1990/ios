@@ -33,9 +33,21 @@ struct AppHomeView: View {
 }
 
 private struct ServiceHomeView: View {
-    private let services = ["手机维修", "打印复印", "家电清洗", "门锁维修", "餐饮外卖"]
-    private let shops = [
+    @EnvironmentObject private var locationProvider: LocationProvider
+    @State private var services = ServiceHomeView.defaultServices
+    @State private var shops = ServiceHomeView.defaultShops
+    @State private var hotSearches = ServiceHomeView.defaultHotSearches
+    @State private var city = "石家庄市"
+    @State private var district = "建华大街"
+    @State private var coverage = "98.6"
+    @State private var trustScore = "98.6"
+    @State private var searchText = ""
+
+    private static let defaultServices = ["手机维修", "打印复印", "家电清洗", "门锁维修", "餐饮外卖"]
+    private static let defaultHotSearches = ["手机换电池", "空调清洗", "开锁换锁", "打印复印", "电脑维修", "外卖订餐"]
+    private static let defaultShops = [
         RecommendedShop(
+            id: "fallback-1",
             rank: 1,
             name: "非凡通讯",
             category: "手机维修中心",
@@ -50,6 +62,7 @@ private struct ServiceHomeView: View {
             symbol: "iphone.gen3"
         ),
         RecommendedShop(
+            id: "fallback-2",
             rank: 2,
             name: "新洁家电清洗",
             category: "桥西店",
@@ -64,6 +77,7 @@ private struct ServiceHomeView: View {
             symbol: "washer.fill"
         ),
         RecommendedShop(
+            id: "fallback-3",
             rank: 3,
             name: "平安开锁换锁服务部",
             category: "24小时服务",
@@ -98,41 +112,22 @@ private struct ServiceHomeView: View {
                 }
             }
             .navigationBarHidden(true)
+            .task {
+                await loadHome()
+            }
         }
     }
 
     private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 7) {
-                    Image(systemName: "mappin.circle.fill")
-                        .foregroundStyle(DesignTokens.ink)
-                    Text("石家庄市")
-                        .font(.title3.weight(.bold))
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.bold))
-                }
-
-                Text("数据覆盖 98.6% 的城区")
-                    .font(.subheadline)
-                    .foregroundStyle(DesignTokens.secondaryText)
-            }
+        HStack {
+            Image(systemName: "mappin.circle.fill")
+                .foregroundStyle(DesignTokens.ink)
+            Text(city)
+                .font(.title3.weight(.bold))
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.bold))
 
             Spacer()
-
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.shield.fill")
-                    .font(.title3)
-                    .foregroundStyle(DesignTokens.emerald)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text("平台可信度 98.6")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(DesignTokens.emerald)
-                    Text("数据真实 · 用户共建")
-                        .font(.caption)
-                        .foregroundStyle(DesignTokens.secondaryText)
-                }
-            }
         }
     }
 
@@ -153,7 +148,7 @@ private struct ServiceHomeView: View {
 
                 Spacer()
 
-                Label("建华大街", systemImage: "location")
+                Label(district, systemImage: "location")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(DesignTokens.secondaryText)
             }
@@ -163,11 +158,17 @@ private struct ServiceHomeView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(DesignTokens.ink)
 
-                Text("输入服务，如手机维修、开锁、家电清洗")
+                TextField("输入服务，如手机维修、开锁、家电清洗", text: $searchText)
                     .font(.subheadline)
                     .foregroundStyle(DesignTokens.secondaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
+                    .submitLabel(.search)
+                    .onSubmit {
+                        Task {
+                            await loadHome(keyword: searchText)
+                        }
+                    }
 
                 Spacer()
 
@@ -177,6 +178,11 @@ private struct ServiceHomeView: View {
                 Label("当前位置", systemImage: "location.circle")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(DesignTokens.ink)
+                    .onTapGesture {
+                        Task {
+                            await loadHome(keyword: searchText)
+                        }
+                    }
             }
             .padding(.horizontal, 18)
             .frame(height: 62)
@@ -191,7 +197,15 @@ private struct ServiceHomeView: View {
     private var serviceShortcuts: some View {
         HStack(spacing: 12) {
             ForEach(services, id: \.self) { service in
-                ServiceShortcut(title: service)
+                Button {
+                    searchText = service
+                    Task {
+                        await loadHome(keyword: service)
+                    }
+                } label: {
+                    ServiceShortcut(title: service)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -275,21 +289,57 @@ private struct ServiceHomeView: View {
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
-                ForEach(["手机换电池", "空调清洗", "开锁换锁", "打印复印", "电脑维修", "外卖订餐"], id: \.self) { item in
-                    Text(item)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(DesignTokens.ink)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .frame(maxWidth: .infinity)
-                        .background(DesignTokens.softEmerald)
-                        .clipShape(Capsule())
+                ForEach(hotSearches, id: \.self) { item in
+                    Button {
+                        searchText = item
+                        Task {
+                            await loadHome(keyword: item)
+                        }
+                    } label: {
+                        Text(item)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(DesignTokens.ink)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
+                            .background(DesignTokens.softEmerald)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
         .padding(16)
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    @MainActor
+    private func loadHome(keyword: String = "") async {
+        locationProvider.requestWhenInUseAuthorization()
+        let location = await locationProvider.currentLocation(timeout: 2)
+
+        do {
+            let feed = try await ShopFeedAPIClient.fetchHome(
+                latitude: location?.coordinate.latitude,
+                longitude: location?.coordinate.longitude,
+                keyword: keyword
+            )
+            city = feed.city
+            district = feed.district
+            coverage = feed.coverage
+            trustScore = feed.trustScore
+            services = feed.services.isEmpty ? Self.defaultServices : feed.services
+            hotSearches = feed.hotServices.isEmpty ? Self.defaultHotSearches : feed.hotServices
+            let mappedShops = feed.shops.enumerated().map { index, shop in
+                shop.recommendedShop(fallbackRank: index + 1)
+            }
+            shops = mappedShops.isEmpty ? Self.defaultShops : mappedShops
+        } catch {
+            shops = Self.defaultShops
+            services = Self.defaultServices
+            hotSearches = Self.defaultHotSearches
+        }
     }
 }
 
@@ -452,9 +502,24 @@ private struct TrustItem: View {
 }
 
 private struct NearbyDiscoveryView: View {
-    private let filters = ["全部", "维修", "餐饮", "生活服务", "24小时"]
-    private let nearbyShops = [
+    @EnvironmentObject private var locationProvider: LocationProvider
+    @State private var filters = NearbyDiscoveryView.defaultFilters
+    @State private var selectedFilter = "全部"
+    @State private var nearbyShops = NearbyDiscoveryView.defaultNearbyShops
+    @State private var insights = NearbyDiscoveryView.defaultInsights
+    @State private var district = "建华大街"
+    @State private var scopeText = "1.2km 范围"
+    @State private var total = 268
+
+    private static let defaultFilters = ["全部", "维修", "餐饮", "生活服务", "24小时"]
+    private static let defaultInsights = [
+        FeedInsight(title: "热区", value: "万达金街", subtitle: "服务密度最高"),
+        FeedInsight(title: "响应", value: "8分钟", subtitle: "平均可联系"),
+        FeedInsight(title: "可信", value: "96.1", subtitle: "均值评分")
+    ]
+    private static let defaultNearbyShops = [
         NearbyShop(
+            id: "fallback-nearby-1",
             name: "星火手机维修",
             service: "手机维修 · 快修",
             distance: "96m",
@@ -467,6 +532,7 @@ private struct NearbyDiscoveryView: View {
             coordinate: CGPoint(x: 0.68, y: 0.34)
         ),
         NearbyShop(
+            id: "fallback-nearby-2",
             name: "云记木桶饭",
             service: "快餐简餐 · 外卖",
             distance: "210m",
@@ -479,6 +545,7 @@ private struct NearbyDiscoveryView: View {
             coordinate: CGPoint(x: 0.36, y: 0.57)
         ),
         NearbyShop(
+            id: "fallback-nearby-3",
             name: "安捷开锁换锁",
             service: "开锁换锁 · 指纹锁",
             distance: "480m",
@@ -500,7 +567,6 @@ private struct NearbyDiscoveryView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
                         header
-                        mapHero
                         filterBar
                         insightStrip
                         recommendedNearby
@@ -511,6 +577,9 @@ private struct NearbyDiscoveryView: View {
                 }
             }
             .navigationBarHidden(true)
+            .task {
+                await loadNearby()
+            }
         }
     }
 
@@ -532,12 +601,12 @@ private struct NearbyDiscoveryView: View {
             VStack(alignment: .trailing, spacing: 6) {
                 HStack(spacing: 5) {
                     Image(systemName: "location.north.circle.fill")
-                    Text("建华大街")
+                    Text(district)
                 }
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(DesignTokens.emerald)
 
-                Text("1.2km 范围")
+                Text(scopeText)
                     .font(.caption)
                     .foregroundStyle(DesignTokens.secondaryText)
             }
@@ -552,90 +621,29 @@ private struct NearbyDiscoveryView: View {
         }
     }
 
-    private var mapHero: some View {
-        ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.03, green: 0.14, blue: 0.13),
-                            Color(red: 0.04, green: 0.32, blue: 0.25),
-                            Color(red: 0.81, green: 0.88, blue: 0.74)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            MapGridOverlay()
-                .opacity(0.48)
-
-            ForEach(nearbyShops) { shop in
-                MapPin(shop: shop)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label("智能探索", systemImage: "sparkles")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.white.opacity(0.18))
-                        .clipShape(Capsule())
-
-                    Spacer()
-
-                    Label("重新定位", systemImage: "scope")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(DesignTokens.ink)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.white)
-                        .clipShape(Capsule())
-                }
-
-                Spacer()
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("附近 268 家可服务商户")
-                        .font(.title2.weight(.black))
-                        .foregroundStyle(.white)
-
-                    Text("优先展示电话真实、近期更新、评价稳定的店铺")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.78))
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.black.opacity(0.22))
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            }
-            .padding(16)
-        }
-        .frame(height: 312)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(.white.opacity(0.35), lineWidth: 1)
-        )
-    }
-
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 ForEach(filters, id: \.self) { filter in
-                    Text(filter)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(filter == "全部" ? .white : DesignTokens.ink)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(filter == "全部" ? DesignTokens.ink : .white)
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(filter == "全部" ? .clear : DesignTokens.line, lineWidth: 1)
-                        )
+                    Button {
+                        selectedFilter = filter
+                        Task {
+                            await loadNearby(service: filter)
+                        }
+                    } label: {
+                        Text(filter)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(filter == selectedFilter ? .white : DesignTokens.ink)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(filter == selectedFilter ? DesignTokens.ink : .white)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(filter == selectedFilter ? .clear : DesignTokens.line, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -643,9 +651,9 @@ private struct NearbyDiscoveryView: View {
 
     private var insightStrip: some View {
         HStack(spacing: 10) {
-            DiscoveryInsightCard(title: "热区", value: "万达金街", subtitle: "服务密度最高")
-            DiscoveryInsightCard(title: "响应", value: "8分钟", subtitle: "平均可联系")
-            DiscoveryInsightCard(title: "可信", value: "96.1", subtitle: "均值评分")
+            ForEach(insights.prefix(3)) { insight in
+                DiscoveryInsightCard(title: insight.title, value: insight.value, subtitle: insight.subtitle)
+            }
         }
     }
 
@@ -670,10 +678,41 @@ private struct NearbyDiscoveryView: View {
             }
         }
     }
+
+    @MainActor
+    private func loadNearby(service: String? = nil) async {
+        locationProvider.requestWhenInUseAuthorization()
+        let location = await locationProvider.currentLocation(timeout: 2)
+
+        do {
+            let feed = try await ShopFeedAPIClient.fetchNearby(
+                latitude: location?.coordinate.latitude,
+                longitude: location?.coordinate.longitude,
+                service: service ?? selectedFilter
+            )
+            district = feed.district
+            scopeText = feed.scopeText
+            total = feed.total
+            filters = feed.filters.isEmpty ? Self.defaultFilters : feed.filters
+            insights = feed.insights.isEmpty ? Self.defaultInsights : feed.insights
+            let mappedShops = feed.shops.map { $0.nearbyShop() }
+            nearbyShops = mappedShops.isEmpty ? Self.defaultNearbyShops : mappedShops
+        } catch {
+            filters = Self.defaultFilters
+            insights = Self.defaultInsights
+            nearbyShops = Self.defaultNearbyShops
+            total = Self.defaultNearbyShops.count
+        }
+    }
 }
 
 private struct StreetVerifyTaskView: View {
     @State private var isShowingCapture = false
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(keyPath: \ShopRecord.timestamp, ascending: false)],
+        animation: .default
+    )
+    private var records: FetchedResults<ShopRecord>
 
     var body: some View {
         NavigationStack {
@@ -691,9 +730,9 @@ private struct StreetVerifyTaskView: View {
                             .foregroundStyle(DesignTokens.secondaryText)
 
                         HStack(spacing: 12) {
-                            TaskMetric(title: "待审核", value: "12", color: .orange)
-                            TaskMetric(title: "已通过", value: "86", color: DesignTokens.emerald)
-                            TaskMetric(title: "未通过", value: "3", color: .red)
+                            TaskMetric(title: "待审核", value: "\(records.count)", color: .orange)
+                            TaskMetric(title: "已通过", value: "0", color: DesignTokens.emerald)
+                            TaskMetric(title: "未通过", value: "0", color: .red)
                         }
 
                         VStack(alignment: .leading, spacing: 12) {
@@ -710,7 +749,7 @@ private struct StreetVerifyTaskView: View {
                                 .font(.system(size: 44, weight: .black, design: .rounded))
                                 .foregroundStyle(DesignTokens.ink)
 
-                            Text("今日预计收益 36 金币")
+                            Text("本地已采集 \(records.count) 条，审核通过后自动入账")
                                 .font(.subheadline)
                                 .foregroundStyle(DesignTokens.secondaryText)
                         }
@@ -730,13 +769,13 @@ private struct StreetVerifyTaskView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         }
 
-                        StaticTaskList()
+                        StreetRecordList(records: Array(records.prefix(8)))
                     }
                     .padding(18)
                 }
             }
             .fullScreenCover(isPresented: $isShowingCapture) {
-                ZStack(alignment: .topLeading) {
+                ZStack(alignment: .topTrailing) {
                     CameraCaptureView()
                     Button {
                         isShowingCapture = false
@@ -748,7 +787,7 @@ private struct StreetVerifyTaskView: View {
                             .background(.black.opacity(0.42))
                             .clipShape(Circle())
                     }
-                    .padding(.leading, 18)
+                    .padding(.trailing, 18)
                     .padding(.top, 18)
                 }
             }
@@ -772,22 +811,20 @@ private struct ProfileCenterView: View {
     @State private var profile = UserProfileSummary.placeholder
 
     private let stats = [
-        ProfileStat(title: "待审核", value: "12", subtitle: "采集记录", color: Color.orange),
-        ProfileStat(title: "已通过", value: "86", subtitle: "真实入库", color: DesignTokens.emerald),
-        ProfileStat(title: "可信贡献", value: "98.2", subtitle: "贡献指数", color: DesignTokens.ink)
+        ProfileStat(title: "待审核", value: "12", subtitle: "待处理", color: Color.orange),
+        ProfileStat(title: "已通过", value: "86", subtitle: "本月累计", color: Color(red: 0.18, green: 0.82, blue: 0.42)),
+        ProfileStat(title: "可信分", value: "98.2", subtitle: "贡献指数", color: Color(red: 0.0, green: 0.72, blue: 0.96))
     ]
 
     private let quickActions = [
-        ProfileAction(title: "我的采集", subtitle: "查看扫街记录", symbol: "camera.viewfinder", tint: DesignTokens.emerald),
-        ProfileAction(title: "审核进度", subtitle: "待审/通过/未通过", symbol: "checkmark.seal.fill", tint: Color.orange),
-        ProfileAction(title: "我的评价", subtitle: "评价与收藏", symbol: "star.bubble.fill", tint: Color(red: 0.12, green: 0.34, blue: 0.78)),
-        ProfileAction(title: "身份认证", subtitle: "众包人员资料", symbol: "person.text.rectangle.fill", tint: DesignTokens.ink)
+        ProfileAction(title: "采集", subtitle: "扫街记录", symbol: "camera.viewfinder", tint: Color(red: 0.18, green: 0.82, blue: 0.42)),
+        ProfileAction(title: "审核", subtitle: "进度", symbol: "checkmark.seal.fill", tint: Color.orange),
+        ProfileAction(title: "认证", subtitle: "资料", symbol: "person.text.rectangle.fill", tint: Color(red: 0.0, green: 0.72, blue: 0.96))
     ]
 
     private let settings = [
         ProfileSetting(title: "账号与安全", subtitle: "登录密码、绑定手机", symbol: "lock.shield.fill"),
-        ProfileSetting(title: "消息通知", subtitle: "审核、奖励、咨询提醒", symbol: "bell.badge.fill"),
-        ProfileSetting(title: "数据与隐私", subtitle: "定位权限、图片上传说明", symbol: "hand.raised.fill"),
+        ProfileSetting(title: "消息通知", subtitle: "审核与奖励提醒", symbol: "bell.badge.fill"),
         ProfileSetting(title: "帮助与反馈", subtitle: "问题反馈、客服支持", symbol: "questionmark.circle.fill")
     ]
 
@@ -797,12 +834,12 @@ private struct ProfileCenterView: View {
                 DesignTokens.background.ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        profileHero
-                        walletCard
-                        contributionStats
-                        quickActionGrid
-                        auditTimeline
+                    VStack(alignment: .leading, spacing: 16) {
+                        header
+                        activityHero
+                        metricStrip
+                        actionDock
+                        recentAudit
                         settingsList
                     }
                     .padding(.horizontal, 18)
@@ -817,124 +854,6 @@ private struct ProfileCenterView: View {
         }
     }
 
-    private var profileHero: some View {
-        ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.04, green: 0.06, blue: 0.07),
-                            Color(red: 0.04, green: 0.27, blue: 0.22),
-                            DesignTokens.emerald
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            Circle()
-                .fill(.white.opacity(0.1))
-                .frame(width: 160, height: 160)
-                .offset(x: 52, y: -58)
-
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top, spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(.white.opacity(0.16))
-                            .frame(width: 70, height: 70)
-
-                        Image(systemName: "person.crop.circle.fill.badge.checkmark")
-                            .font(.system(size: 42, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack(spacing: 8) {
-                            Text(profile.displayName)
-                                .font(.title2.weight(.black))
-                                .foregroundStyle(.white)
-
-                            Text(profile.syncStatus.contains("已同步") ? "已登录" : "演示")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(DesignTokens.ink)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.white)
-                                .clipShape(Capsule())
-                        }
-
-                        Text(profile.accountLine)
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.76))
-
-                        HStack(spacing: 8) {
-                            Label(profile.locationName, systemImage: "location.fill")
-                            Label(profile.roleName, systemImage: "shield.lefthalf.filled")
-                        }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.76))
-                    }
-
-                    Spacer()
-                }
-
-                HStack(spacing: 10) {
-                    ProfilePill(title: "今日可提现", value: "¥12.86")
-                    ProfilePill(title: "账号状态", value: profile.syncStatus)
-                }
-            }
-            .padding(20)
-        }
-        .frame(minHeight: 196)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-    }
-
-    private var walletCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Label("金币钱包", systemImage: "bitcoinsign.circle.fill")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(DesignTokens.ink)
-
-                Spacer()
-
-                Text("提现")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 9)
-                    .background(DesignTokens.emerald)
-                    .clipShape(Capsule())
-            }
-
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
-                Text("1,286")
-                    .font(.system(size: 46, weight: .black, design: .rounded))
-                    .foregroundStyle(DesignTokens.ink)
-
-                Text("金币")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(DesignTokens.secondaryText)
-            }
-
-            HStack {
-                Label("已通过记录自动入账", systemImage: "checkmark.circle.fill")
-                Spacer()
-                Text("预计到账 36 金币")
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(DesignTokens.secondaryText)
-        }
-        .padding(18)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(DesignTokens.line, lineWidth: 1)
-        )
-    }
-
     private func refreshProfile() async {
         do {
             profile = try await UserAPIClient.currentUserInfo()
@@ -943,54 +862,119 @@ private struct ProfileCenterView: View {
         }
     }
 
-    private var contributionStats: some View {
-        HStack(spacing: 10) {
-            ForEach(stats) { stat in
-                ProfileStatCard(stat: stat)
-            }
-        }
-    }
-
-    private var quickActionGrid: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("常用功能")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(DesignTokens.ink)
-
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ForEach(quickActions) { action in
-                    ProfileActionCard(action: action)
-                }
-            }
-        }
-    }
-
-    private var auditTimeline: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("最近审核")
-                    .font(.title3.weight(.bold))
+    private var header: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("我的")
+                    .font(.system(size: 34, weight: .black, design: .rounded))
                     .foregroundStyle(DesignTokens.ink)
 
-                Spacer()
-
-                Text("全部记录")
-                    .font(.caption.weight(.bold))
+                Text("保持真实贡献，轻量管理账户。")
+                    .font(.subheadline)
                     .foregroundStyle(DesignTokens.secondaryText)
             }
+
+            Spacer()
+
+            Image(systemName: "person.crop.circle.fill.badge.checkmark")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(DesignTokens.ink)
+                .frame(width: 52, height: 52)
+                .background(.white)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(DesignTokens.line, lineWidth: 1))
+        }
+    }
+
+    private var activityHero: some View {
+        HStack(alignment: .center, spacing: 14) {
+            ProfileActivityRing()
+                .frame(width: 104, height: 104)
+
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(profile.displayName)
+                            .font(.title2.weight(.black))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.86)
+
+                        Text(profile.syncStatus.contains("已同步") ? "已登录" : "演示")
+                            .font(.caption2.weight(.black))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(red: 0.70, green: 1.0, blue: 0.34))
+                            .clipShape(Capsule())
+                    }
+
+                    Text(profile.accountLine)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(1)
+                }
+
+                Text("今日贡献")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.62))
+
+                HStack(alignment: .lastTextBaseline, spacing: 6) {
+                    Text("12")
+                        .font(.system(size: 44, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+
+                    Text("条待审核")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+
+                HStack(spacing: 8) {
+                    Label(profile.locationName, systemImage: "location.fill")
+                    Label(profile.roleName, systemImage: "shield.lefthalf.filled")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.66))
+                .lineLimit(1)
+                .minimumScaleFactor(0.84)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.035, green: 0.04, blue: 0.045))
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+    }
+
+    private var metricStrip: some View {
+        HStack(spacing: 10) {
+            ForEach(stats) { stat in
+                ProfileMetricPill(stat: stat)
+            }
+        }
+    }
+
+    private var actionDock: some View {
+        HStack(spacing: 10) {
+            ForEach(quickActions) { action in
+                ProfileActionButton(action: action)
+            }
+        }
+    }
+
+    private var recentAudit: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "最近审核", action: "全部")
 
             VStack(spacing: 0) {
                 ProfileAuditRow(title: "云记木桶饭", status: "待审核", subtitle: "电话与门头照片已提交", color: Color.orange)
                 Divider().padding(.leading, 46)
                 ProfileAuditRow(title: "星火手机维修", status: "已通过", subtitle: "奖励 18 金币已入账", color: DesignTokens.emerald)
-                Divider().padding(.leading, 46)
-                ProfileAuditRow(title: "安捷开锁换锁", status: "需补充", subtitle: "服务内容描述不完整", color: Color.red)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
             .background(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(DesignTokens.line, lineWidth: 1)
             )
         }
@@ -1015,69 +999,6 @@ private struct ProfileCenterView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(DesignTokens.line, lineWidth: 1)
         )
-    }
-}
-
-private struct MapGridOverlay: View {
-    var body: some View {
-        ZStack {
-            ForEach(0..<7, id: \.self) { index in
-                Capsule()
-                    .fill(.white.opacity(0.18))
-                    .frame(width: 1.2)
-                    .rotationEffect(.degrees(index.isMultiple(of: 2) ? 58 : -42))
-                    .offset(x: CGFloat(index - 3) * 42)
-            }
-
-            ForEach(0..<5, id: \.self) { index in
-                Capsule()
-                    .fill(.white.opacity(0.2))
-                    .frame(height: 1.2)
-                    .rotationEffect(.degrees(index.isMultiple(of: 2) ? -9 : 13))
-                    .offset(y: CGFloat(index - 2) * 48)
-            }
-
-            Circle()
-                .stroke(.white.opacity(0.2), lineWidth: 1)
-                .frame(width: 178, height: 178)
-                .offset(x: 38, y: -16)
-
-            Circle()
-                .stroke(.white.opacity(0.12), lineWidth: 1)
-                .frame(width: 246, height: 246)
-                .offset(x: -72, y: 68)
-        }
-    }
-}
-
-private struct MapPin: View {
-    let shop: NearbyShop
-
-    var body: some View {
-        GeometryReader { proxy in
-            VStack(spacing: 5) {
-                Image(systemName: shop.symbol)
-                    .font(.caption.weight(.black))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(DesignTokens.emerald)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(.white, lineWidth: 2))
-                    .shadow(color: .black.opacity(0.22), radius: 8, x: 0, y: 5)
-
-                Text(shop.distance)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(DesignTokens.ink)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(.white)
-                    .clipShape(Capsule())
-            }
-            .position(
-                x: proxy.size.width * shop.coordinate.x,
-                y: proxy.size.height * shop.coordinate.y
-            )
-        }
     }
 }
 
@@ -1216,6 +1137,138 @@ private struct ProfilePill: View {
         .padding(12)
         .background(.white.opacity(0.14))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct SectionHeader: View {
+    let title: String
+    let action: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(DesignTokens.ink)
+
+            Spacer()
+
+            Text(action)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(DesignTokens.secondaryText)
+        }
+    }
+}
+
+private struct ProfileActivityRing: View {
+    var body: some View {
+        ZStack {
+            ring(color: Color(red: 0.18, green: 0.82, blue: 0.42), lineWidth: 13, progress: 0.82)
+                .padding(2)
+            ring(color: Color(red: 1.0, green: 0.24, blue: 0.52), lineWidth: 13, progress: 0.66)
+                .padding(18)
+            ring(color: Color(red: 0.0, green: 0.72, blue: 0.96), lineWidth: 13, progress: 0.48)
+                .padding(34)
+
+            VStack(spacing: 0) {
+                Text("86")
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+
+                Text("通过")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+        }
+    }
+
+    private func ring(color: Color, lineWidth: CGFloat, progress: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .stroke(.white.opacity(0.08), lineWidth: lineWidth)
+
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    color,
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+        }
+    }
+}
+
+private struct ProfileMetricPill: View {
+    let stat: ProfileStat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(stat.color)
+                    .frame(width: 8, height: 8)
+
+                Text(stat.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(DesignTokens.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Text(stat.value)
+                .font(.system(size: 25, weight: .black, design: .rounded))
+                .foregroundStyle(DesignTokens.ink)
+                .lineLimit(1)
+
+            Text(stat.subtitle)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(DesignTokens.secondaryText)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(DesignTokens.line, lineWidth: 1)
+        )
+    }
+}
+
+private struct ProfileActionButton: View {
+    let action: ProfileAction
+
+    var body: some View {
+        Button(action: {}) {
+            VStack(spacing: 8) {
+                Image(systemName: action.symbol)
+                    .font(.system(size: 20, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(action.tint)
+                    .clipShape(Circle())
+
+                VStack(spacing: 2) {
+                    Text(action.title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(DesignTokens.ink)
+                        .lineLimit(1)
+
+                    Text(action.subtitle)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(DesignTokens.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(DesignTokens.line, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -1430,40 +1483,140 @@ private struct TaskMetric: View {
     }
 }
 
-private struct StaticTaskList: View {
-    private let rows = [
-        "核实建华大街手机维修门店电话",
-        "补充中山路家电清洗服务内容",
-        "拍摄裕华区新开门店门头"
-    ]
+private struct StreetRecordList: View {
+    let records: [ShopRecord]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("推荐任务")
-                .font(.headline.weight(.bold))
-                .foregroundStyle(DesignTokens.ink)
+            HStack {
+                Text("扫街记录")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(DesignTokens.ink)
 
-            ForEach(rows, id: \.self) { row in
-                HStack {
-                    Image(systemName: "scope")
-                        .foregroundStyle(DesignTokens.emerald)
-                    Text(row)
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(DesignTokens.secondaryText)
-                }
-                .padding(14)
+                Spacer()
+
+                Text("\(records.count) 条")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(DesignTokens.secondaryText)
+            }
+
+            if records.isEmpty {
+                ContentUnavailableView(
+                    "暂无扫街记录",
+                    systemImage: "text.viewfinder",
+                    description: Text("点击开始扫街录入，识别后的店铺会显示在这里。")
+                )
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity)
                 .background(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(records) { record in
+                        NavigationLink {
+                            RecordDetailView(record: record)
+                        } label: {
+                            StreetRecordCard(record: record)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
     }
 }
 
-private struct RecommendedShop: Identifiable {
-    let id = UUID()
+private struct StreetRecordCard: View {
+    @ObservedObject var record: ShopRecord
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RecordThumbnail(path: record.imagePath)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(title)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(DesignTokens.ink)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text("待审核")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(DesignTokens.secondaryText)
+                    .lineLimit(1)
+
+                HStack(spacing: 8) {
+                    Label(phoneText, systemImage: "phone.fill")
+                    Label(locationText, systemImage: "location.fill")
+                    Spacer()
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(DesignTokens.secondaryText)
+
+                if let timestamp = record.timestamp {
+                    Text(timestamp.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(DesignTokens.secondaryText)
+                }
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.black))
+                .foregroundStyle(DesignTokens.secondaryText)
+        }
+        .padding(14)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(DesignTokens.line, lineWidth: 1)
+        )
+    }
+
+    private var title: String {
+        if let shopName = record.shopName, !shopName.isEmpty {
+            return shopName
+        }
+        return record.phoneNumber?.isEmpty == false ? record.phoneNumber ?? "未命名店铺" : "未命名店铺"
+    }
+
+    private var subtitle: String {
+        if let serviceContent = record.serviceContent, !serviceContent.isEmpty {
+            return serviceContent
+        }
+
+        let text = record.fullText?.replacingOccurrences(of: "\n", with: " ") ?? ""
+        if text.isEmpty {
+            return "服务内容待完善"
+        }
+        return String(text.prefix(36))
+    }
+
+    private var phoneText: String {
+        record.phoneNumber?.isEmpty == false ? record.phoneNumber ?? "无号码" : "无号码"
+    }
+
+    private var locationText: String {
+        if record.latitude == 0 && record.longitude == 0 {
+            return "未定位"
+        }
+        return String(format: "%.4f, %.4f", record.latitude, record.longitude)
+    }
+}
+
+struct RecommendedShop: Identifiable {
+    let id: String
     let rank: Int
     let name: String
     let category: String
@@ -1478,8 +1631,8 @@ private struct RecommendedShop: Identifiable {
     let symbol: String
 }
 
-private struct NearbyShop: Identifiable {
-    let id = UUID()
+struct NearbyShop: Identifiable {
+    let id: String
     let name: String
     let service: String
     let distance: String
