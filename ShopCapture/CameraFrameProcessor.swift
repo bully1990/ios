@@ -20,7 +20,6 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private enum Constants {
         static let frameProcessingInterval = 2
         static let requiredStableDetections = 1
-        static let recognitionRegion = CGRect(x: 0.05, y: 0.15, width: 0.9, height: 0.7)
         static let maximumZoomFactor: CGFloat = 6
     }
 
@@ -66,6 +65,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var latestPixelBuffer: CVPixelBuffer?
     private var latestImageOrientation: CGImagePropertyOrientation = .right
     private var isAutomaticDetectionEnabled = false
+    private var guideOffset = CGPoint.zero
 
     func start(automaticDetection: Bool) {
         latestPixelBuffer = nil
@@ -166,7 +166,6 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                 pixelBuffer: pixelBuffer,
                 orientation: self.latestImageOrientation,
                 recognitionLevel: .accurate,
-                regionOfInterest: nil,
                 mode: .manual
             )
         }
@@ -193,6 +192,10 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                 print("Warning: failed to update zoom: \(error.localizedDescription)")
             }
         }
+    }
+
+    func setGuideOffset(_ offset: CGPoint) {
+        guideOffset = offset
     }
 
     func updateOrientation(_ deviceOrientation: UIDeviceOrientation) {
@@ -330,7 +333,6 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                 pixelBuffer: pixelBuffer,
                 orientation: currentImageOrientation,
                 recognitionLevel: .accurate,
-                regionOfInterest: Constants.recognitionRegion,
                 mode: .automatic
             )
         }
@@ -340,9 +342,20 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         pixelBuffer: CVPixelBuffer,
         orientation: CGImagePropertyOrientation,
         recognitionLevel: VNRequestTextRecognitionLevel,
-        regionOfInterest: CGRect?,
         mode: RecognitionMode
     ) {
+        guard let croppedImage = makeCroppedUIImage(from: pixelBuffer, orientation: orientation, region: effectiveGuideRegion()),
+              let cgImage = croppedImage.cgImage else {
+            isVisionBusy = false
+            if mode == .manual {
+                Task { @MainActor in
+                    self.state = .idle
+                    self.message = "拍照裁剪失败"
+                }
+            }
+            return
+        }
+
         let request = VNRecognizeTextRequest { [weak self] request, error in
             guard let self else { return }
             defer { self.isVisionBusy = false }
@@ -358,17 +371,14 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                 return
             }
 
-            self.handleVisionResults(request.results, pixelBuffer: pixelBuffer, orientation: orientation, mode: mode)
+            self.handleVisionResults(request.results, image: croppedImage, mode: mode)
         }
 
         request.recognitionLevel = recognitionLevel
         request.usesLanguageCorrection = false
-        if let regionOfInterest {
-            request.regionOfInterest = regionOfInterest
-        }
         request.recognitionLanguages = ["zh-Hans", "en-US"]
 
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
 
         do {
             try handler.perform([request])
@@ -384,7 +394,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         }
     }
 
-    private func handleVisionResults(_ results: [VNObservation]?, pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation, mode: RecognitionMode) {
+    private func handleVisionResults(_ results: [VNObservation]?, image: UIImage, mode: RecognitionMode) {
         guard let observations = results as? [VNRecognizedTextObservation] else {
             resetStability()
             if mode == .manual {
@@ -396,7 +406,6 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             return
         }
 
-        let image = makeUIImage(from: pixelBuffer, orientation: orientation)
         let textLines = OCRTextContextBuilder.lines(from: observations, image: image)
         let fullText = textLines.map(\.text).joined(separator: "\n")
 
@@ -435,17 +444,6 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             return
         }
 
-        guard let image else {
-            resetStability()
-            if mode == .manual {
-                Task { @MainActor in
-                    state = .idle
-                    message = "拍照识别失败"
-                }
-            }
-            return
-        }
-
         lastCaptureTime = now
         state = .detecting
 
@@ -463,12 +461,43 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         stableCount = 0
     }
 
+    private func effectiveGuideRegion() -> CGRect {
+        let guide = CaptureGuide.region.offsetBy(dx: -guideOffset.x, dy: -guideOffset.y)
+        let minX = min(max(guide.minX, 0), 1)
+        let minY = min(max(guide.minY, 0), 1)
+        let maxX = min(max(guide.maxX, 0), 1)
+        let maxY = min(max(guide.maxY, 0), 1)
+        return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+    }
+
     private func makeUIImage(from pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) -> UIImage? {
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
         guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
             return nil
         }
         return UIImage(cgImage: cgImage, scale: UIScreen.main.scale, orientation: .up)
+    }
+
+    private func makeCroppedUIImage(from pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation, region: CGRect) -> UIImage? {
+        guard let image = makeUIImage(from: pixelBuffer, orientation: orientation),
+              let cgImage = image.cgImage else {
+            return nil
+        }
+
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        let cropRect = CGRect(
+            x: region.minX * width,
+            y: region.minY * height,
+            width: region.width * width,
+            height: region.height * height
+        ).integral
+
+        guard let croppedCGImage = cgImage.cropping(to: cropRect) else {
+            return nil
+        }
+
+        return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: .up)
     }
 }
 

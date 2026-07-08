@@ -34,6 +34,7 @@ struct CameraCaptureView: View {
     @State private var deviceOrientation: UIDeviceOrientation = .portrait
     @State private var previewOffset: CGSize = .zero
     @State private var committedPreviewOffset: CGSize = .zero
+    @State private var previewSize: CGSize = .zero
     @State private var gestureStartZoom: CGFloat?
     @State private var recognitionMode: RecognitionMode = .manual
 
@@ -47,14 +48,21 @@ struct CameraCaptureView: View {
                 .ignoresSafeArea()
 
             GeometryReader { proxy in
-                let width = proxy.size.width * 0.6
-                let height = proxy.size.height * 0.6
+                let guide = CaptureGuide.region
+                let width = proxy.size.width * guide.width
+                let height = proxy.size.height * guide.height
 
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(processor.isRecognizing ? .white.opacity(0.82) : .white.opacity(0.35), lineWidth: 2)
                     .frame(width: width, height: height)
-                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                    .position(x: proxy.size.width * guide.midX, y: proxy.size.height * guide.midY)
                     .shadow(color: .black.opacity(0.32), radius: 8)
+                    .onAppear {
+                        updatePreviewSize(proxy.size)
+                    }
+                    .onChange(of: proxy.size) { _, newSize in
+                        updatePreviewSize(newSize)
+                    }
             }
             .allowsHitTesting(false)
 
@@ -278,9 +286,11 @@ struct CameraCaptureView: View {
                         height: committedPreviewOffset.height + value.translation.height
                     )
                 )
+                updateProcessorGuideOffset()
             }
             .onEnded { _ in
                 committedPreviewOffset = previewOffset
+                updateProcessorGuideOffset()
             }
     }
 
@@ -301,6 +311,7 @@ struct CameraCaptureView: View {
     private func resetPreviewTransform() {
         previewOffset = .zero
         committedPreviewOffset = .zero
+        processor.setGuideOffset(.zero)
         processor.setZoomFactor(1)
     }
 
@@ -308,6 +319,25 @@ struct CameraCaptureView: View {
         CGSize(
             width: min(max(offset.width, -140), 140),
             height: min(max(offset.height, -180), 180)
+        )
+    }
+
+    private func updatePreviewSize(_ size: CGSize) {
+        previewSize = size
+        updateProcessorGuideOffset()
+    }
+
+    private func updateProcessorGuideOffset() {
+        guard previewSize.width > 0, previewSize.height > 0 else {
+            processor.setGuideOffset(.zero)
+            return
+        }
+
+        processor.setGuideOffset(
+            CGPoint(
+                x: previewOffset.width / previewSize.width,
+                y: previewOffset.height / previewSize.height
+            )
         )
     }
 
