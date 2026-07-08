@@ -65,7 +65,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var latestPixelBuffer: CVPixelBuffer?
     private var latestImageOrientation: CGImagePropertyOrientation = .right
     private var isAutomaticDetectionEnabled = false
-    private var captureRegion = CaptureGuide.region
+    private var captureGuideLayerRect = CGRect.zero
+    private var capturePreviewSize = CGSize.zero
     private var automaticallySavedPhoneNumberKeys = Set<String>()
 
     func start(automaticDetection: Bool) {
@@ -199,8 +200,13 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         }
     }
 
-    func setCaptureRegion(_ region: CGRect) {
-        captureRegion = clamped(region)
+    func setCaptureViewport(guideLayerRect: CGRect, previewSize: CGSize) {
+        guard guideLayerRect.width > 0, guideLayerRect.height > 0, previewSize.width > 0, previewSize.height > 0 else {
+            return
+        }
+
+        captureGuideLayerRect = guideLayerRect
+        capturePreviewSize = previewSize
     }
 
     func updateOrientation(_ deviceOrientation: UIDeviceOrientation) {
@@ -349,7 +355,12 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         recognitionLevel: VNRequestTextRecognitionLevel,
         mode: RecognitionMode
     ) {
-        guard let croppedImage = makeCroppedUIImage(from: pixelBuffer, orientation: orientation, region: captureRegion),
+        guard let croppedImage = makeCroppedUIImage(
+            from: pixelBuffer,
+            orientation: orientation,
+            guideLayerRect: captureGuideLayerRect,
+            previewSize: capturePreviewSize
+        ),
               let cgImage = croppedImage.cgImage else {
             isVisionBusy = false
             if mode == .manual {
@@ -487,14 +498,6 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             .joined(separator: "|")
     }
 
-    private func clamped(_ region: CGRect) -> CGRect {
-        let minX = min(max(region.minX, 0), 1)
-        let minY = min(max(region.minY, 0), 1)
-        let maxX = min(max(region.maxX, 0), 1)
-        let maxY = min(max(region.maxY, 0), 1)
-        return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
-    }
-
     private func makeUIImage(from pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) -> UIImage? {
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
         guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
@@ -503,26 +506,69 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         return UIImage(cgImage: cgImage, scale: UIScreen.main.scale, orientation: .up)
     }
 
-    private func makeCroppedUIImage(from pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation, region: CGRect) -> UIImage? {
+    private func makeCroppedUIImage(
+        from pixelBuffer: CVPixelBuffer,
+        orientation: CGImagePropertyOrientation,
+        guideLayerRect: CGRect,
+        previewSize: CGSize
+    ) -> UIImage? {
         guard let image = makeUIImage(from: pixelBuffer, orientation: orientation),
               let cgImage = image.cgImage else {
             return nil
         }
 
-        let width = CGFloat(cgImage.width)
-        let height = CGFloat(cgImage.height)
-        let cropRect = CGRect(
-            x: region.minX * width,
-            y: region.minY * height,
-            width: region.width * width,
-            height: region.height * height
-        ).integral
+        let imageSize = CGSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height))
+        let cropRect = visibleImageCropRect(
+            imageSize: imageSize,
+            previewSize: previewSize,
+            guideLayerRect: guideLayerRect
+        ) ?? fallbackCropRect(imageSize: imageSize)
 
         guard let croppedCGImage = cgImage.cropping(to: cropRect) else {
             return nil
         }
 
         return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: .up)
+    }
+
+    private func visibleImageCropRect(imageSize: CGSize, previewSize: CGSize, guideLayerRect: CGRect) -> CGRect? {
+        guard imageSize.width > 0,
+              imageSize.height > 0,
+              previewSize.width > 0,
+              previewSize.height > 0,
+              guideLayerRect.width > 0,
+              guideLayerRect.height > 0 else {
+            return nil
+        }
+
+        let scale = max(previewSize.width / imageSize.width, previewSize.height / imageSize.height)
+        let displayedSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let displayedOrigin = CGPoint(
+            x: (previewSize.width - displayedSize.width) / 2,
+            y: (previewSize.height - displayedSize.height) / 2
+        )
+        let cropRect = CGRect(
+            x: (guideLayerRect.minX - displayedOrigin.x) / scale,
+            y: (guideLayerRect.minY - displayedOrigin.y) / scale,
+            width: guideLayerRect.width / scale,
+            height: guideLayerRect.height / scale
+        )
+
+        let boundedRect = cropRect.intersection(CGRect(origin: .zero, size: imageSize)).integral
+        guard !boundedRect.isNull, boundedRect.width > 0, boundedRect.height > 0 else {
+            return nil
+        }
+
+        return boundedRect
+    }
+
+    private func fallbackCropRect(imageSize: CGSize) -> CGRect {
+        CGRect(
+            x: CaptureGuide.region.minX * imageSize.width,
+            y: CaptureGuide.region.minY * imageSize.height,
+            width: CaptureGuide.region.width * imageSize.width,
+            height: CaptureGuide.region.height * imageSize.height
+        ).integral
     }
 }
 
