@@ -60,11 +60,14 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var stablePhoneNumber: String?
     private var stableCount = 0
     private var lastCaptureTime = Date.distantPast
-    private var currentImageOrientation: CGImagePropertyOrientation = .right
+    private var currentImageOrientation: CGImagePropertyOrientation = .up
+    private var currentVideoOrientation: AVCaptureVideoOrientation = .portrait
     private var cameraDevice: AVCaptureDevice?
+    private var videoOutput: AVCaptureVideoDataOutput?
     private var latestPixelBuffer: CVPixelBuffer?
-    private var latestImageOrientation: CGImagePropertyOrientation = .right
+    private var latestImageOrientation: CGImagePropertyOrientation = .up
     private var isAutomaticDetectionEnabled = false
+    private var captureMetadataRect = CGRect.zero
     private var captureGuideLayerRect = CGRect.zero
     private var capturePreviewSize = CGSize.zero
     private var automaticallySavedPhoneNumberKeys = Set<String>()
@@ -200,21 +203,37 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         }
     }
 
-    func setCaptureViewport(guideLayerRect: CGRect, previewSize: CGSize) {
-        guard guideLayerRect.width > 0, guideLayerRect.height > 0, previewSize.width > 0, previewSize.height > 0 else {
+    func setCaptureViewport(metadataRect: CGRect, guideLayerRect: CGRect, previewSize: CGSize) {
+        guard metadataRect.width > 0,
+              metadataRect.height > 0,
+              guideLayerRect.width > 0,
+              guideLayerRect.height > 0,
+              previewSize.width > 0,
+              previewSize.height > 0 else {
             return
         }
 
+        captureMetadataRect = clamped(metadataRect)
         captureGuideLayerRect = guideLayerRect
         capturePreviewSize = previewSize
     }
 
     func updateOrientation(_ deviceOrientation: UIDeviceOrientation) {
-        guard let imageOrientation = CGImagePropertyOrientation(deviceOrientation: deviceOrientation) else {
+        guard let videoOrientation = AVCaptureVideoOrientation(deviceOrientation: deviceOrientation) else {
             return
         }
 
-        currentImageOrientation = imageOrientation
+        currentImageOrientation = .up
+        currentVideoOrientation = videoOrientation
+
+        sessionQueue.async { [weak self] in
+            guard let connection = self?.videoOutput?.connection(with: .video),
+                  connection.isVideoOrientationSupported else {
+                return
+            }
+
+            connection.videoOrientation = videoOrientation
+        }
     }
 
     func markSaveCompleted() {
@@ -298,6 +317,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
         output.setSampleBufferDelegate(self, queue: visionQueue)
+        videoOutput = output
 
         if session.canAddOutput(output) {
             session.addOutput(output)
@@ -305,7 +325,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
         if let connection = output.connection(with: .video) {
             if connection.isVideoOrientationSupported {
-                connection.videoOrientation = .portrait
+                connection.videoOrientation = currentVideoOrientation
             }
             if connection.isVideoMirroringSupported {
                 connection.isVideoMirrored = false
@@ -342,7 +362,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         autoreleasepool {
             performTextRecognition(
                 pixelBuffer: pixelBuffer,
-                orientation: currentImageOrientation,
+                orientation: .up,
                 recognitionLevel: .accurate,
                 mode: .automatic
             )
@@ -358,6 +378,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         guard let croppedImage = makeCroppedUIImage(
             from: pixelBuffer,
             orientation: orientation,
+            metadataRect: captureMetadataRect,
             guideLayerRect: captureGuideLayerRect,
             previewSize: capturePreviewSize
         ),
@@ -509,14 +530,21 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private func makeCroppedUIImage(
         from pixelBuffer: CVPixelBuffer,
         orientation: CGImagePropertyOrientation,
+        metadataRect: CGRect,
         guideLayerRect: CGRect,
         previewSize: CGSize
     ) -> UIImage? {
+        let rawImage = CIImage(cvPixelBuffer: pixelBuffer)
+
+        if let metadataCropRect = metadataCropRect(imageExtent: rawImage.extent, metadataRect: metadataRect),
+           let image = makeUIImage(from: rawImage.cropped(to: metadataCropRect), orientation: orientation) {
+            return image
+        }
+
         guard let image = makeUIImage(from: pixelBuffer, orientation: orientation),
               let cgImage = image.cgImage else {
             return nil
         }
-
         let imageSize = CGSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height))
         let cropRect = visibleImageCropRect(
             imageSize: imageSize,
@@ -529,6 +557,35 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         }
 
         return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: .up)
+    }
+
+    private func makeUIImage(from ciImage: CIImage, orientation: CGImagePropertyOrientation) -> UIImage? {
+        let orientedImage = ciImage.oriented(orientation)
+        guard let cgImage = ciContext.createCGImage(orientedImage, from: orientedImage.extent) else {
+            return nil
+        }
+
+        return UIImage(cgImage: cgImage, scale: UIScreen.main.scale, orientation: .up)
+    }
+
+    private func metadataCropRect(imageExtent: CGRect, metadataRect: CGRect) -> CGRect? {
+        guard metadataRect.width > 0, metadataRect.height > 0, imageExtent.width > 0, imageExtent.height > 0 else {
+            return nil
+        }
+
+        let normalizedRect = clamped(metadataRect)
+        let cropRect = CGRect(
+            x: imageExtent.minX + normalizedRect.minX * imageExtent.width,
+            y: imageExtent.minY + (1 - normalizedRect.maxY) * imageExtent.height,
+            width: normalizedRect.width * imageExtent.width,
+            height: normalizedRect.height * imageExtent.height
+        ).integral
+        let boundedRect = cropRect.intersection(imageExtent).integral
+        guard !boundedRect.isNull, boundedRect.width > 0, boundedRect.height > 0 else {
+            return nil
+        }
+
+        return boundedRect
     }
 
     private func visibleImageCropRect(imageSize: CGSize, previewSize: CGSize, guideLayerRect: CGRect) -> CGRect? {
@@ -570,6 +627,14 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             height: CaptureGuide.region.height * imageSize.height
         ).integral
     }
+
+    private func clamped(_ region: CGRect) -> CGRect {
+        let minX = min(max(region.minX, 0), 1)
+        let minY = min(max(region.minY, 0), 1)
+        let maxX = min(max(region.maxX, 0), 1)
+        let maxY = min(max(region.maxY, 0), 1)
+        return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+    }
 }
 
 extension CameraFrameProcessor: AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -578,17 +643,17 @@ extension CameraFrameProcessor: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 }
 
-private extension CGImagePropertyOrientation {
+private extension AVCaptureVideoOrientation {
     init?(deviceOrientation: UIDeviceOrientation) {
         switch deviceOrientation {
         case .portrait:
-            self = .right
+            self = .portrait
         case .portraitUpsideDown:
-            self = .left
+            self = .portraitUpsideDown
         case .landscapeLeft:
-            self = .up
+            self = .landscapeRight
         case .landscapeRight:
-            self = .down
+            self = .landscapeLeft
         default:
             return nil
         }

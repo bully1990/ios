@@ -45,8 +45,8 @@ struct CameraCaptureView: View {
                 session: processor.session,
                 deviceOrientation: deviceOrientation,
                 guideLayerRect: guideLayerRect
-            ) { guideLayerRect, previewSize in
-                processor.setCaptureViewport(guideLayerRect: guideLayerRect, previewSize: previewSize)
+            ) { metadataRect, guideLayerRect, previewSize in
+                processor.setCaptureViewport(metadataRect: metadataRect, guideLayerRect: guideLayerRect, previewSize: previewSize)
             }
                 .offset(previewOffset)
                 .contentShape(Rectangle())

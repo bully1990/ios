@@ -6,7 +6,7 @@ struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
     let deviceOrientation: UIDeviceOrientation
     let guideLayerRect: CGRect
-    let onCaptureRegionChange: (CGRect, CGSize) -> Void
+    let onCaptureRegionChange: (CGRect, CGRect, CGSize) -> Void
 
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView()
@@ -34,7 +34,7 @@ final class PreviewUIView: UIView {
     }
 
     private var guideLayerRect = CGRect.zero
-    private var onCaptureRegionChange: ((CGRect, CGSize) -> Void)?
+    private var onCaptureRegionChange: ((CGRect, CGRect, CGSize) -> Void)?
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -53,7 +53,7 @@ final class PreviewUIView: UIView {
         publishCaptureRegion()
     }
 
-    func updateGuideLayerRect(_ rect: CGRect, onChange: @escaping (CGRect, CGSize) -> Void) {
+    func updateGuideLayerRect(_ rect: CGRect, onChange: @escaping (CGRect, CGRect, CGSize) -> Void) {
         onCaptureRegionChange = onChange
 
         guard rect.width > 0, rect.height > 0 else {
@@ -69,7 +69,8 @@ final class PreviewUIView: UIView {
             return
         }
 
-        onCaptureRegionChange?(guideLayerRect, bounds.size)
+        let metadataRect = videoPreviewLayer.metadataOutputRectConverted(fromLayerRect: guideLayerRect)
+        onCaptureRegionChange?(metadataRect, guideLayerRect, bounds.size)
     }
 }
 
