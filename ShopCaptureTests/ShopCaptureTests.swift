@@ -22,6 +22,10 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "01088886666")
     }
 
+    func testExtractsValidLandlineWithoutPhoneKeyword() {
+        XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: "0755-88886666"), "075588886666")
+    }
+
     func testRejectsTextWithoutPhoneNumber() {
         XCTAssertNil(PhoneNumberExtractor.firstPhoneNumber(in: "营业时间 09:00-18:00"))
     }
