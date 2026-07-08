@@ -16,6 +16,9 @@ struct CapturedShopPayload {
 enum ShopRecordStore {
     static func save(_ payload: CapturedShopPayload, persistence: PersistenceController = .shared) async throws {
         let id = UUID()
+        guard let uploadImageData = payload.image.jpegData(compressionQuality: 0.78) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
         let imageURL = try writeImage(payload.image, id: id)
         let context = persistence.newBackgroundContext()
 
@@ -33,6 +36,26 @@ enum ShopRecordStore {
 
             if context.hasChanges {
                 try context.save()
+            }
+        }
+
+        let uploadPayload = ShopCaptureUploadRequest(
+            clientID: id,
+            imageData: uploadImageData,
+            fullText: payload.fullText,
+            phoneNumber: payload.phoneNumber,
+            shopName: payload.shopName,
+            serviceContent: payload.serviceContent,
+            latitude: payload.latitude,
+            longitude: payload.longitude,
+            timestamp: payload.timestamp
+        )
+
+        Task.detached {
+            do {
+                try await ShopCaptureAPIClient.upload(uploadPayload)
+            } catch {
+                print("Warning: failed to upload shop record: \(error.localizedDescription)")
             }
         }
     }

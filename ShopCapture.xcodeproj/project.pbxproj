@@ -28,6 +28,8 @@
 		0A0000482C31000100000000 /* OCRTextContextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000472C31000100000000 /* OCRTextContextBuilder.swift */; };
 		0A00004A2C31000100000000 /* CaptureGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000492C31000100000000 /* CaptureGuide.swift */; };
 		0A00004C2C31000100000000 /* AppHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A00004B2C31000100000000 /* AppHomeView.swift */; };
+		0A00004E2C31000100000000 /* ShopCaptureAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A00004D2C31000100000000 /* ShopCaptureAPIClient.swift */; };
+		0A0000502C31000100000000 /* UserAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A00004F2C31000100000000 /* UserAPIClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -65,6 +67,8 @@
 		0A0000472C31000100000000 /* OCRTextContextBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRTextContextBuilder.swift; sourceTree = "<group>"; };
 		0A0000492C31000100000000 /* CaptureGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureGuide.swift; sourceTree = "<group>"; };
 		0A00004B2C31000100000000 /* AppHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHomeView.swift; sourceTree = "<group>"; };
+		0A00004D2C31000100000000 /* ShopCaptureAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShopCaptureAPIClient.swift; sourceTree = "<group>"; };
+		0A00004F2C31000100000000 /* UserAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserAPIClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -106,6 +110,8 @@
 				0A0000162C31000100000000 /* LocationProvider.swift */,
 				0A0000172C31000100000000 /* PersistenceController.swift */,
 				0A0000182C31000100000000 /* ShopRecordStore.swift */,
+				0A00004D2C31000100000000 /* ShopCaptureAPIClient.swift */,
+				0A00004F2C31000100000000 /* UserAPIClient.swift */,
 				0A0000192C31000100000000 /* HistoryView.swift */,
 				0A00001A2C31000100000000 /* RecordDetailView.swift */,
 				0A00001B2C31000100000000 /* ImageLoader.swift */,
@@ -247,6 +253,8 @@
 				0A0000062C31000100000000 /* LocationProvider.swift in Sources */,
 				0A0000072C31000100000000 /* PersistenceController.swift in Sources */,
 				0A0000082C31000100000000 /* ShopRecordStore.swift in Sources */,
+				0A00004E2C31000100000000 /* ShopCaptureAPIClient.swift in Sources */,
+				0A0000502C31000100000000 /* UserAPIClient.swift in Sources */,
 				0A0000092C31000100000000 /* HistoryView.swift in Sources */,
 				0A00000A2C31000100000000 /* RecordDetailView.swift in Sources */,
 				0A00000B2C31000100000000 /* ImageLoader.swift in Sources */,

@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS `v9_shop_capture_records` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `client_uuid` varchar(64) NOT NULL DEFAULT '',
+  `shop_name` varchar(255) NOT NULL DEFAULT '',
+  `service_content` text,
+  `phone_number` varchar(255) NOT NULL DEFAULT '',
+  `full_text` mediumtext,
+  `image_url` varchar(500) NOT NULL DEFAULT '',
+  `latitude` decimal(10,7) NOT NULL DEFAULT '0.0000000',
+  `longitude` decimal(10,7) NOT NULL DEFAULT '0.0000000',
+  `capture_time` int(10) unsigned NOT NULL DEFAULT '0',
+  `audit_status` tinyint(1) NOT NULL DEFAULT '0' COMMENT '0待审核 1已通过 2未通过',
+  `reward_coins` int(10) unsigned NOT NULL DEFAULT '0',
+  `source` varchar(32) NOT NULL DEFAULT 'ios',
+  `created_at` int(10) unsigned NOT NULL DEFAULT '0',
+  `updated_at` int(10) unsigned NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `client_uuid` (`client_uuid`),
+  KEY `phone_number` (`phone_number`),
+  KEY `audit_status` (`audit_status`),
+  KEY `created_at` (`created_at`),
+  KEY `location` (`latitude`, `longitude`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
