@@ -576,7 +576,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         let normalizedRect = clamped(metadataRect)
         let cropRect = CGRect(
             x: imageExtent.minX + normalizedRect.minX * imageExtent.width,
-            y: imageExtent.minY + (1 - normalizedRect.maxY) * imageExtent.height,
+            y: imageExtent.minY + normalizedRect.minY * imageExtent.height,
             width: normalizedRect.width * imageExtent.width,
             height: normalizedRect.height * imageExtent.height
         ).integral
