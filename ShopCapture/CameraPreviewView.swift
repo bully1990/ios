@@ -5,18 +5,22 @@ import UIKit
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
     let deviceOrientation: UIDeviceOrientation
+    let guideLayerRect: CGRect
+    let onCaptureRegionChange: (CGRect) -> Void
 
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView()
         view.videoPreviewLayer.session = session
         view.videoPreviewLayer.videoGravity = .resizeAspectFill
         view.updateOrientation(deviceOrientation)
+        view.updateGuideLayerRect(guideLayerRect, onChange: onCaptureRegionChange)
         return view
     }
 
     func updateUIView(_ uiView: PreviewUIView, context: Context) {
         uiView.videoPreviewLayer.session = session
         uiView.updateOrientation(deviceOrientation)
+        uiView.updateGuideLayerRect(guideLayerRect, onChange: onCaptureRegionChange)
     }
 }
 
@@ -28,6 +32,8 @@ final class PreviewUIView: UIView {
     var videoPreviewLayer: AVCaptureVideoPreviewLayer {
         layer as! AVCaptureVideoPreviewLayer
     }
+
+    private var guideLayerRect = CGRect.zero
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -42,6 +48,16 @@ final class PreviewUIView: UIView {
         }
 
         connection.videoOrientation = videoOrientation
+    }
+
+    func updateGuideLayerRect(_ rect: CGRect, onChange: (CGRect) -> Void) {
+        guard rect.width > 0, rect.height > 0 else {
+            return
+        }
+
+        guideLayerRect = rect
+        let captureRegion = videoPreviewLayer.metadataOutputRectConverted(fromLayerRect: rect)
+        onChange(captureRegion)
     }
 }
 

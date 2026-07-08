@@ -65,7 +65,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var latestPixelBuffer: CVPixelBuffer?
     private var latestImageOrientation: CGImagePropertyOrientation = .right
     private var isAutomaticDetectionEnabled = false
-    private var guideOffset = CGPoint.zero
+    private var captureRegion = CaptureGuide.region
 
     func start(automaticDetection: Bool) {
         latestPixelBuffer = nil
@@ -194,8 +194,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         }
     }
 
-    func setGuideOffset(_ offset: CGPoint) {
-        guideOffset = offset
+    func setCaptureRegion(_ region: CGRect) {
+        captureRegion = clamped(region)
     }
 
     func updateOrientation(_ deviceOrientation: UIDeviceOrientation) {
@@ -344,7 +344,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         recognitionLevel: VNRequestTextRecognitionLevel,
         mode: RecognitionMode
     ) {
-        guard let croppedImage = makeCroppedUIImage(from: pixelBuffer, orientation: orientation, region: effectiveGuideRegion()),
+        guard let croppedImage = makeCroppedUIImage(from: pixelBuffer, orientation: orientation, region: captureRegion),
               let cgImage = croppedImage.cgImage else {
             isVisionBusy = false
             if mode == .manual {
@@ -461,12 +461,11 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         stableCount = 0
     }
 
-    private func effectiveGuideRegion() -> CGRect {
-        let guide = CaptureGuide.region.offsetBy(dx: -guideOffset.x, dy: -guideOffset.y)
-        let minX = min(max(guide.minX, 0), 1)
-        let minY = min(max(guide.minY, 0), 1)
-        let maxX = min(max(guide.maxX, 0), 1)
-        let maxY = min(max(guide.maxY, 0), 1)
+    private func clamped(_ region: CGRect) -> CGRect {
+        let minX = min(max(region.minX, 0), 1)
+        let minY = min(max(region.minY, 0), 1)
+        let maxX = min(max(region.maxX, 0), 1)
+        let maxY = min(max(region.maxY, 0), 1)
         return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
     }
 

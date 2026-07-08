@@ -35,12 +35,19 @@ struct CameraCaptureView: View {
     @State private var previewOffset: CGSize = .zero
     @State private var committedPreviewOffset: CGSize = .zero
     @State private var previewSize: CGSize = .zero
+    @State private var guideLayerRect: CGRect = .zero
     @State private var gestureStartZoom: CGFloat?
     @State private var recognitionMode: RecognitionMode = .manual
 
     var body: some View {
         ZStack {
-            CameraPreviewView(session: processor.session, deviceOrientation: deviceOrientation)
+            CameraPreviewView(
+                session: processor.session,
+                deviceOrientation: deviceOrientation,
+                guideLayerRect: guideLayerRect
+            ) { captureRegion in
+                processor.setCaptureRegion(captureRegion)
+            }
                 .offset(previewOffset)
                 .contentShape(Rectangle())
                 .gesture(previewDragGesture)
@@ -280,17 +287,18 @@ struct CameraCaptureView: View {
     private var previewDragGesture: some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
-                previewOffset = clampedOffset(
+                let nextOffset = clampedOffset(
                     CGSize(
                         width: committedPreviewOffset.width + value.translation.width,
                         height: committedPreviewOffset.height + value.translation.height
                     )
                 )
-                updateProcessorGuideOffset()
+                previewOffset = nextOffset
+                updateProcessorGuideLayerRect(for: nextOffset)
             }
             .onEnded { _ in
                 committedPreviewOffset = previewOffset
-                updateProcessorGuideOffset()
+                updateProcessorGuideLayerRect(for: previewOffset)
             }
     }
 
@@ -311,7 +319,7 @@ struct CameraCaptureView: View {
     private func resetPreviewTransform() {
         previewOffset = .zero
         committedPreviewOffset = .zero
-        processor.setGuideOffset(.zero)
+        updateProcessorGuideLayerRect(for: .zero)
         processor.setZoomFactor(1)
     }
 
@@ -324,20 +332,21 @@ struct CameraCaptureView: View {
 
     private func updatePreviewSize(_ size: CGSize) {
         previewSize = size
-        updateProcessorGuideOffset()
+        updateProcessorGuideLayerRect(for: previewOffset)
     }
 
-    private func updateProcessorGuideOffset() {
+    private func updateProcessorGuideLayerRect(for offset: CGSize) {
         guard previewSize.width > 0, previewSize.height > 0 else {
-            processor.setGuideOffset(.zero)
+            guideLayerRect = .zero
             return
         }
 
-        processor.setGuideOffset(
-            CGPoint(
-                x: previewOffset.width / previewSize.width,
-                y: previewOffset.height / previewSize.height
-            )
+        let guide = CaptureGuide.region
+        guideLayerRect = CGRect(
+            x: previewSize.width * guide.minX - offset.width,
+            y: previewSize.height * guide.minY - offset.height,
+            width: previewSize.width * guide.width,
+            height: previewSize.height * guide.height
         )
     }
 
