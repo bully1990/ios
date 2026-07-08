@@ -29,6 +29,11 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "17266688538")
     }
 
+    func testExtractsPhoneNumberWithAdditionalOCRDigitMistakes() {
+        let text = "联系电话：13日 2G10 8311"
+        XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "13826108311")
+    }
+
     func testExtractsLandlineNumber() {
         let text = "订餐电话：010-88886666"
         XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "01088886666")

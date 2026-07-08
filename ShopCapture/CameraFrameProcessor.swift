@@ -66,11 +66,15 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var latestImageOrientation: CGImagePropertyOrientation = .right
     private var isAutomaticDetectionEnabled = false
     private var captureRegion = CaptureGuide.region
+    private var automaticallySavedPhoneNumberKeys = Set<String>()
 
     func start(automaticDetection: Bool) {
         latestPixelBuffer = nil
         resetStability()
         isAutomaticDetectionEnabled = automaticDetection
+        if automaticDetection {
+            automaticallySavedPhoneNumberKeys.removeAll()
+        }
 
         Task { @MainActor in
             self.isRecognizing = true
@@ -115,6 +119,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         state = .idle
         latestPixelBuffer = nil
         isAutomaticDetectionEnabled = false
+        automaticallySavedPhoneNumberKeys.removeAll()
 
         Task { @MainActor in
             self.isRecognizing = false
@@ -421,8 +426,18 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             return
         }
         let phoneNumber = phoneNumbers.joined(separator: "、")
+        let phoneNumberKey = canonicalPhoneNumberKey(from: phoneNumbers)
 
         if mode == .automatic {
+            guard !automaticallySavedPhoneNumberKeys.contains(phoneNumberKey) else {
+                resetStability()
+                Task { @MainActor in
+                    state = .idle
+                    message = "已识别过，继续扫描新店铺"
+                }
+                return
+            }
+
             if stablePhoneNumber == phoneNumber {
                 stableCount += 1
             } else {
@@ -446,6 +461,9 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
         lastCaptureTime = now
         state = .detecting
+        if mode == .automatic {
+            automaticallySavedPhoneNumberKeys.insert(phoneNumberKey)
+        }
 
         let prioritizedText = OCRTextContextBuilder.prioritizedText(from: textLines, phoneNumber: phoneNumber)
         let detectedFrame = DetectedShopFrame(image: image, fullText: prioritizedText, phoneNumber: phoneNumber)
@@ -459,6 +477,14 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private func resetStability() {
         stablePhoneNumber = nil
         stableCount = 0
+    }
+
+    private func canonicalPhoneNumberKey(from phoneNumbers: [String]) -> String {
+        phoneNumbers
+            .map { $0.filter(\.isNumber) }
+            .filter { !$0.isEmpty }
+            .sorted()
+            .joined(separator: "|")
     }
 
     private func clamped(_ region: CGRect) -> CGRect {
