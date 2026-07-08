@@ -27,6 +27,7 @@
 		0A0000462C31000100000000 /* DeepSeekClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000452C31000100000000 /* DeepSeekClient.swift */; };
 		0A0000482C31000100000000 /* OCRTextContextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000472C31000100000000 /* OCRTextContextBuilder.swift */; };
 		0A00004A2C31000100000000 /* CaptureGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000492C31000100000000 /* CaptureGuide.swift */; };
+		0A00004C2C31000100000000 /* AppHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A00004B2C31000100000000 /* AppHomeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +64,7 @@
 		0A0000452C31000100000000 /* DeepSeekClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekClient.swift; sourceTree = "<group>"; };
 		0A0000472C31000100000000 /* OCRTextContextBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRTextContextBuilder.swift; sourceTree = "<group>"; };
 		0A0000492C31000100000000 /* CaptureGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureGuide.swift; sourceTree = "<group>"; };
+		0A00004B2C31000100000000 /* AppHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHomeView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -96,6 +98,7 @@
 			isa = PBXGroup;
 			children = (
 				0A0000112C31000100000000 /* ShopCaptureApp.swift */,
+				0A00004B2C31000100000000 /* AppHomeView.swift */,
 				0A0000122C31000100000000 /* ContentView.swift */,
 				0A0000132C31000100000000 /* CameraCaptureView.swift */,
 				0A0000142C31000100000000 /* CameraFrameProcessor.swift */,
@@ -236,6 +239,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0A0000012C31000100000000 /* ShopCaptureApp.swift in Sources */,
+				0A00004C2C31000100000000 /* AppHomeView.swift in Sources */,
 				0A0000022C31000100000000 /* ContentView.swift in Sources */,
 				0A0000032C31000100000000 /* CameraCaptureView.swift in Sources */,
 				0A0000042C31000100000000 /* CameraFrameProcessor.swift in Sources */,
