@@ -4,6 +4,7 @@ enum PhoneNumberExtractor {
     private static let separatorPattern = #"[\s\-–—－·.]*"#
     private static let mobilePattern = #"(?<!\d)1"# + separatorPattern + #"[3-9]"# + separatorPattern + #"\d(?:"# + separatorPattern + #"\d){8}(?!\d)"#
     private static let landlinePattern = #"(?<!\d)0\d{2,3}"# + separatorPattern + #"\d{7,8}(?:"# + separatorPattern + #"(?:转|ext\.?|#)"# + separatorPattern + #"\d{1,6})?(?!\d)"#
+    private static let service400Pattern = #"(?<!\d)400"# + separatorPattern + #"\d{3,4}"# + separatorPattern + #"\d{3,4}(?!\d)"#
 
     static func firstPhoneNumber(in text: String) -> String? {
         allPhoneNumbers(in: text).first
@@ -11,7 +12,7 @@ enum PhoneNumberExtractor {
 
     static func allPhoneNumbers(in text: String) -> [String] {
         let normalized = normalizeOCRText(text)
-        let patterns = [mobilePattern, landlinePattern]
+        let patterns = [service400Pattern, mobilePattern, landlinePattern]
         var phoneNumbers: [String] = []
 
         for pattern in patterns {
@@ -113,11 +114,19 @@ enum PhoneNumberExtractor {
             return true
         }
 
+        if isValid400Number(digits) {
+            return true
+        }
+
         if allowsLandline, isValidLandline(digits) {
             return true
         }
 
         return false
+    }
+
+    private static func isValid400Number(_ digits: String) -> Bool {
+        digits.hasPrefix("400") && digits.count == 10
     }
 
     private static func isValidLandline(_ digits: String) -> Bool {
