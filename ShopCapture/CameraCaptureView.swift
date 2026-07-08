@@ -7,10 +7,17 @@ struct CameraCaptureView: View {
     @State private var isShowingHistory = false
     @State private var isShowingPhotoPicker = false
     @State private var deviceOrientation: UIDeviceOrientation = .portrait
+    @State private var previewOffset: CGSize = .zero
+    @State private var committedPreviewOffset: CGSize = .zero
+    @State private var gestureStartZoom: CGFloat?
 
     var body: some View {
         ZStack {
             CameraPreviewView(session: processor.session, deviceOrientation: deviceOrientation)
+                .offset(previewOffset)
+                .contentShape(Rectangle())
+                .gesture(previewDragGesture)
+                .simultaneousGesture(previewZoomGesture)
                 .ignoresSafeArea()
 
             GeometryReader { proxy in
@@ -38,6 +45,10 @@ struct CameraCaptureView: View {
                     Text("也可以从相册选择门头图片识别")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.78))
+
+                    Text("开启后可双指缩放、拖动画面，或点拍照识别")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.68))
                 }
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 28)
@@ -91,19 +102,71 @@ struct CameraCaptureView: View {
                             .clipShape(Capsule())
                     }
 
-                    Button {
-                        toggleRecognition()
-                    } label: {
-                        Label(processor.isRecognizing ? "停止识别" : "开始识别", systemImage: processor.isRecognizing ? "stop.fill" : "camera.viewfinder")
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 15)
-                            .background(processor.isRecognizing ? .red.opacity(0.9) : .green.opacity(0.9))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
+                    if processor.isRecognizing {
+                        HStack(spacing: 12) {
+                            Button {
+                                processor.captureCurrentFrame()
+                            } label: {
+                                Label("拍照识别", systemImage: "camera.fill")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(.black)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 15)
+                                    .background(.white.opacity(0.95))
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            }
+                            .accessibilityLabel("拍照识别")
+
+                            Button {
+                                toggleRecognition()
+                            } label: {
+                                Label("停止", systemImage: "stop.fill")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 15)
+                                    .background(.red.opacity(0.9))
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            }
+                            .accessibilityLabel("停止识别")
+                        }
+                    } else {
+                        Button {
+                            toggleRecognition()
+                        } label: {
+                            Label("开始识别", systemImage: "camera.viewfinder")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 15)
+                                .background(.green.opacity(0.9))
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
+                        }
+                        .accessibilityLabel("开始识别")
                     }
-                    .accessibilityLabel(processor.isRecognizing ? "停止识别" : "开始识别")
+
+                    if processor.isRecognizing {
+                        HStack(spacing: 10) {
+                            Label(String(format: "缩放 %.1fx", processor.zoomFactor), systemImage: "plus.magnifyingglass")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.88))
+
+                            Spacer()
+
+                            Button {
+                                resetPreviewTransform()
+                            } label: {
+                                Label("重置取景", systemImage: "arrow.counterclockwise")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(.black.opacity(0.42))
+                        .clipShape(Capsule())
+                    }
                 }
                 .padding(.horizontal, 22)
                 .padding(.bottom, 28)
@@ -152,6 +215,48 @@ struct CameraCaptureView: View {
         } else {
             processor.start()
         }
+    }
+
+    private var previewDragGesture: some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { value in
+                previewOffset = clampedOffset(
+                    CGSize(
+                        width: committedPreviewOffset.width + value.translation.width,
+                        height: committedPreviewOffset.height + value.translation.height
+                    )
+                )
+            }
+            .onEnded { _ in
+                committedPreviewOffset = previewOffset
+            }
+    }
+
+    private var previewZoomGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                if gestureStartZoom == nil {
+                    gestureStartZoom = processor.zoomFactor
+                }
+
+                processor.setZoomFactor((gestureStartZoom ?? 1) * value)
+            }
+            .onEnded { _ in
+                gestureStartZoom = nil
+            }
+    }
+
+    private func resetPreviewTransform() {
+        previewOffset = .zero
+        committedPreviewOffset = .zero
+        processor.setZoomFactor(1)
+    }
+
+    private func clampedOffset(_ offset: CGSize) -> CGSize {
+        CGSize(
+            width: min(max(offset.width, -140), 140),
+            height: min(max(offset.height, -180), 180)
+        )
     }
 
     private func importPhoto(_ image: UIImage) async {

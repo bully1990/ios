@@ -19,8 +19,14 @@ protocol CameraFrameProcessorDelegate: AnyObject {
 final class CameraFrameProcessor: NSObject, ObservableObject {
     private enum Constants {
         static let frameProcessingInterval = 2
-        static let requiredStableDetections = 2
+        static let requiredStableDetections = 1
         static let recognitionRegion = CGRect(x: 0.05, y: 0.15, width: 0.9, height: 0.7)
+        static let maximumZoomFactor: CGFloat = 6
+    }
+
+    private enum RecognitionMode {
+        case automatic
+        case manual
     }
 
     enum CaptureState {
@@ -40,6 +46,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         }
     }
     @Published private(set) var isRecognizing = false
+    @Published private(set) var zoomFactor: CGFloat = 1
 
     weak var delegate: CameraFrameProcessorDelegate?
 
@@ -55,8 +62,14 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var stableCount = 0
     private var lastCaptureTime = Date.distantPast
     private var currentImageOrientation: CGImagePropertyOrientation = .right
+    private var cameraDevice: AVCaptureDevice?
+    private var latestPixelBuffer: CVPixelBuffer?
+    private var latestImageOrientation: CGImagePropertyOrientation = .right
 
     func start() {
+        latestPixelBuffer = nil
+        resetStability()
+
         Task { @MainActor in
             self.isRecognizing = true
             self.message = "正在开启识别"
@@ -98,6 +111,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     func stop() {
         resetStability()
         state = .idle
+        latestPixelBuffer = nil
 
         Task { @MainActor in
             self.isRecognizing = false
@@ -107,6 +121,73 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         sessionQueue.async {
             if self.session.isRunning {
                 self.session.stopRunning()
+            }
+        }
+    }
+
+    func captureCurrentFrame() {
+        guard isRecognizing else {
+            message = "请先开始摄像头"
+            return
+        }
+
+        guard state == .idle else {
+            message = "正在处理上一张"
+            return
+        }
+
+        state = .detecting
+        message = "正在拍照识别"
+
+        visionQueue.async { [weak self] in
+            guard let self else { return }
+
+            guard !self.isVisionBusy else {
+                Task { @MainActor in
+                    self.state = .idle
+                    self.message = "正在识别中，请稍后再拍"
+                }
+                return
+            }
+
+            guard let pixelBuffer = self.latestPixelBuffer else {
+                Task { @MainActor in
+                    self.state = .idle
+                    self.message = "请稍等相机画面稳定"
+                }
+                return
+            }
+
+            self.isVisionBusy = true
+            self.performTextRecognition(
+                pixelBuffer: pixelBuffer,
+                orientation: self.latestImageOrientation,
+                recognitionLevel: .accurate,
+                regionOfInterest: nil,
+                mode: .manual
+            )
+        }
+    }
+
+    func setZoomFactor(_ factor: CGFloat) {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.cameraDevice else {
+                return
+            }
+
+            let maxZoom = min(device.activeFormat.videoMaxZoomFactor, Constants.maximumZoomFactor)
+            let clampedFactor = min(max(factor, 1), maxZoom)
+
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = clampedFactor
+                device.unlockForConfiguration()
+
+                Task { @MainActor in
+                    self.zoomFactor = clampedFactor
+                }
+            } catch {
+                print("Warning: failed to update zoom: \(error.localizedDescription)")
             }
         }
     }
@@ -180,6 +261,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             return
         }
 
+        cameraDevice = device
+
         do {
             let input = try AVCaptureDeviceInput(device: device)
             if session.canAddInput(input) {
@@ -218,6 +301,13 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private func process(sampleBuffer: CMSampleBuffer) {
         frameIndex += 1
 
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return
+        }
+
+        latestPixelBuffer = pixelBuffer
+        latestImageOrientation = currentImageOrientation
+
         guard frameIndex % Constants.frameProcessingInterval == 0 else {
             return
         }
@@ -229,43 +319,73 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         isVisionBusy = true
 
         autoreleasepool {
-            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-                isVisionBusy = false
-                return
-            }
-
-            let imageOrientation = currentImageOrientation
-            let request = VNRecognizeTextRequest { [weak self] request, error in
-                guard let self else { return }
-                defer { self.isVisionBusy = false }
-
-                if let error {
-                    print("Warning: Vision OCR failed: \(error.localizedDescription)")
-                    return
-                }
-
-                self.handleVisionResults(request.results, pixelBuffer: pixelBuffer, orientation: imageOrientation)
-            }
-
-            request.recognitionLevel = .fast
-            request.usesLanguageCorrection = false
-            request.regionOfInterest = Constants.recognitionRegion
-            request.recognitionLanguages = ["zh-Hans", "en-US"]
-
-            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: imageOrientation, options: [:])
-
-            do {
-                try handler.perform([request])
-            } catch {
-                isVisionBusy = false
-                print("Warning: Vision request failed: \(error.localizedDescription)")
-            }
+            performTextRecognition(
+                pixelBuffer: pixelBuffer,
+                orientation: currentImageOrientation,
+                recognitionLevel: .accurate,
+                regionOfInterest: Constants.recognitionRegion,
+                mode: .automatic
+            )
         }
     }
 
-    private func handleVisionResults(_ results: [VNObservation]?, pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) {
+    private func performTextRecognition(
+        pixelBuffer: CVPixelBuffer,
+        orientation: CGImagePropertyOrientation,
+        recognitionLevel: VNRequestTextRecognitionLevel,
+        regionOfInterest: CGRect?,
+        mode: RecognitionMode
+    ) {
+        let request = VNRecognizeTextRequest { [weak self] request, error in
+            guard let self else { return }
+            defer { self.isVisionBusy = false }
+
+            if let error {
+                print("Warning: Vision OCR failed: \(error.localizedDescription)")
+                if mode == .manual {
+                    Task { @MainActor in
+                        self.state = .idle
+                        self.message = "拍照识别失败"
+                    }
+                }
+                return
+            }
+
+            self.handleVisionResults(request.results, pixelBuffer: pixelBuffer, orientation: orientation, mode: mode)
+        }
+
+        request.recognitionLevel = recognitionLevel
+        request.usesLanguageCorrection = false
+        if let regionOfInterest {
+            request.regionOfInterest = regionOfInterest
+        }
+        request.recognitionLanguages = ["zh-Hans", "en-US"]
+
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
+
+        do {
+            try handler.perform([request])
+        } catch {
+            isVisionBusy = false
+            if mode == .manual {
+                Task { @MainActor in
+                    self.state = .idle
+                    self.message = "拍照识别失败"
+                }
+            }
+            print("Warning: Vision request failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func handleVisionResults(_ results: [VNObservation]?, pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation, mode: RecognitionMode) {
         guard let observations = results as? [VNRecognizedTextObservation] else {
             resetStability()
+            if mode == .manual {
+                Task { @MainActor in
+                    state = .idle
+                    message = "未识别到文字"
+                }
+            }
             return
         }
 
@@ -275,31 +395,45 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
         guard let phoneNumber = PhoneNumberExtractor.firstPhoneNumber(in: fullText) else {
             resetStability()
-            return
-        }
-
-        if stablePhoneNumber == phoneNumber {
-            stableCount += 1
-        } else {
-            stablePhoneNumber = phoneNumber
-            stableCount = 1
-        }
-
-        guard stableCount >= Constants.requiredStableDetections else {
-            Task { @MainActor in
-                message = "识别中 \(stableCount)/\(Constants.requiredStableDetections)"
+            if mode == .manual {
+                Task { @MainActor in
+                    state = .idle
+                    message = "未识别到电话号码"
+                }
             }
             return
         }
 
+        if mode == .automatic {
+            if stablePhoneNumber == phoneNumber {
+                stableCount += 1
+            } else {
+                stablePhoneNumber = phoneNumber
+                stableCount = 1
+            }
+
+            guard stableCount >= Constants.requiredStableDetections else {
+                Task { @MainActor in
+                    message = "识别中 \(stableCount)/\(Constants.requiredStableDetections)"
+                }
+                return
+            }
+        }
+
         let now = Date()
-        guard now.timeIntervalSince(lastCaptureTime) > 2 else {
+        guard mode == .manual || now.timeIntervalSince(lastCaptureTime) > 2 else {
             resetStability()
             return
         }
 
         guard let image else {
             resetStability()
+            if mode == .manual {
+                Task { @MainActor in
+                    state = .idle
+                    message = "拍照识别失败"
+                }
+            }
             return
         }
 
@@ -310,7 +444,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         let detectedFrame = DetectedShopFrame(image: image, fullText: prioritizedText, phoneNumber: phoneNumber)
 
         Task { @MainActor in
-            message = "正在保存"
+            message = mode == .manual ? "拍照识别成功，正在保存" : "正在保存"
             delegate?.cameraFrameProcessor(self, didDetect: detectedFrame)
         }
     }
