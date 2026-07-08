@@ -72,6 +72,18 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(summary?.serviceContent, "钣金剪折弯 激光切割加工；铁板 冷轧板 机箱订做 焊接加工")
     }
 
+    func testSummaryPreservesServiceSpacingAsSeparators() {
+        let summary = ShopTextSummary(shopName: "手机专业维修", serviceContent: "新机 二手 配件 批发 回收")
+        let refined = ShopTextSummarizer.refine(summary, fullText: nil)
+        XCTAssertEqual(refined?.serviceContent, "新机、二手、配件、批发、回收")
+    }
+
+    func testSummarySplitsJoinedServiceWords() {
+        let summary = ShopTextSummary(shopName: "手机专业维修", serviceContent: "新机二手配件批发回收")
+        let refined = ShopTextSummarizer.refine(summary, fullText: nil)
+        XCTAssertEqual(refined?.serviceContent, "新机、二手、配件、批发、回收")
+    }
+
     func testOCRContextPrioritizesTextWithSameBackgroundAsPhoneLine() {
         let signColor = OCRBackgroundColor(red: 0.9, green: 0.7, blue: 0.2)
         let neighborColor = OCRBackgroundColor(red: 0.2, green: 0.7, blue: 0.9)

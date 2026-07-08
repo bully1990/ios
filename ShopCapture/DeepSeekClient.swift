@@ -34,7 +34,7 @@ enum ShopTextSummarizer {
             return nil
         }
 
-        let serviceContent = summary.serviceContent
+        let serviceContent = formattedServiceContent(summary.serviceContent)
         let shopName = summary.shopName ?? fallbackName(from: serviceContent)
         let result = ShopTextSummary(shopName: shopName, serviceContent: serviceContent)
 
@@ -100,6 +100,60 @@ enum ShopTextSummarizer {
 
         let services = serviceLines.joined(separator: "；")
         return services.isEmpty ? nil : services
+    }
+
+    private static func formattedServiceContent(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        let normalized = value
+            .replacingOccurrences(of: "，", with: "、")
+            .replacingOccurrences(of: ",", with: "、")
+            .replacingOccurrences(of: "；", with: "、")
+            .replacingOccurrences(of: ";", with: "、")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else {
+            return nil
+        }
+
+        let explicitParts = normalized
+            .components(separatedBy: CharacterSet(charactersIn: "、 \n\t"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if explicitParts.count > 1 {
+            return explicitParts.joined(separator: "、")
+        }
+
+        let compact = normalized.replacingOccurrences(of: "、", with: "")
+        let serviceTerms = [
+            "爆屏修复", "手机维修", "专业维修", "手机专业维修", "手机配件",
+            "数码相机", "新机", "二手", "配件", "批发", "回收", "维修",
+            "代购", "换屏", "贴膜", "解锁", "数据恢复", "扩容", "刷机",
+            "加工", "安装", "订做", "定做", "订制", "定制", "剪折弯",
+            "激光切割", "切割", "焊接", "钣金"
+        ]
+
+        var remaining = compact
+        var parts: [String] = []
+
+        while !remaining.isEmpty {
+            if let matched = serviceTerms.first(where: { remaining.hasPrefix($0) }) {
+                parts.append(matched)
+                remaining.removeFirst(matched.count)
+            } else {
+                let character = remaining.removeFirst()
+                if parts.isEmpty {
+                    parts.append(String(character))
+                } else {
+                    parts[parts.count - 1].append(character)
+                }
+            }
+        }
+
+        return parts.count > 1 ? parts.joined(separator: "、") : normalized
     }
 
     private static func isPhoneLine(_ line: String, phoneNumber: String) -> Bool {
@@ -240,7 +294,7 @@ enum DeepSeekClient {
         输出严格 JSON，不要 Markdown，不要解释。
         JSON 字段：
         - name: 店铺/公司/门头名称，无法判断则为空字符串
-        - services: 主要服务内容，用简短中文短语概括，多个服务用顿号分隔，无法判断则为空字符串
+        - services: 主要服务内容，保留门头上服务词之间的空格关系，多个服务用顿号分隔，无法判断则为空字符串
 
         电话号码：\(phoneNumber)
         OCR 文本：
