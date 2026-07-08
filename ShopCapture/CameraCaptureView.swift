@@ -11,7 +11,7 @@ struct CameraCaptureView: View {
         var startTitle: String {
             switch self {
             case .manual:
-                return "开启相机"
+                return "拍照"
             case .automatic:
                 return "开始自动识别"
             }
@@ -101,144 +101,29 @@ struct CameraCaptureView: View {
             }
 
             VStack {
-                HStack {
-                    Button {
-                        isShowingPhotoPicker = true
-                    } label: {
-                        Image(systemName: "photo.on.rectangle")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.black.opacity(0.45))
-                            .clipShape(Circle())
-                    }
-                    .accessibilityLabel("从相册选择")
-
-                    Spacer()
-
-                    Button {
-                        isShowingHistory = true
-                    } label: {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.black.opacity(0.45))
-                            .clipShape(Circle())
-                    }
-                    .accessibilityLabel("历史记录")
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
+                topToolbar
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
 
                 Spacer()
 
-                VStack(spacing: controlSpacing) {
-                    if let message = processor.message {
-                        Text(message)
-                            .font(messageFont)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, isLandscapeLayout ? 12 : 14)
-                            .padding(.vertical, isLandscapeLayout ? 6 : 9)
-                            .background(.black.opacity(0.55))
-                            .clipShape(Capsule())
-                    }
-
-                    Picker("识别模式", selection: $recognitionMode) {
-                        ForEach(RecognitionMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(processor.isRecognizing)
-                    .controlSize(isLandscapeLayout ? .small : .regular)
-                    .padding(isLandscapeLayout ? 3 : 4)
-                    .background(.black.opacity(0.36))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                    if processor.isRecognizing {
-                        if recognitionMode == .manual {
-                            HStack(spacing: 12) {
-                                Button {
-                                    processor.captureCurrentFrame()
-                                } label: {
-                                    Label("拍照识别", systemImage: "camera.fill")
-                                        .font(actionButtonFont)
-                                        .foregroundStyle(.black)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, actionButtonVerticalPadding)
-                                        .background(.white.opacity(0.95))
-                                        .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
-                                }
-                                .accessibilityLabel("拍照识别")
-
-                                Button {
-                                    toggleRecognition()
-                                } label: {
-                                    Label("停止", systemImage: "stop.fill")
-                                        .font(actionButtonFont)
-                                        .foregroundStyle(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, actionButtonVerticalPadding)
-                                        .background(.red.opacity(0.9))
-                                        .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
-                                }
-                                .accessibilityLabel("停止识别")
-                            }
-                        } else {
-                            Button {
-                                toggleRecognition()
-                            } label: {
-                                Label("停止自动识别", systemImage: "stop.fill")
-                                    .font(actionButtonFont)
-                                    .foregroundStyle(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, actionButtonVerticalPadding)
-                                    .background(.red.opacity(0.9))
-                                    .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
-                            }
-                            .accessibilityLabel("停止自动识别")
-                        }
-                    } else {
-                        Button {
-                            toggleRecognition()
-                        } label: {
-                            Label(recognitionMode.startTitle, systemImage: recognitionMode == .manual ? "camera.fill" : "camera.viewfinder")
-                                .font(actionButtonFont)
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, actionButtonVerticalPadding)
-                                .background(.green.opacity(0.9))
-                                .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
-                                .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
-                        }
-                        .accessibilityLabel(recognitionMode.startTitle)
-                    }
-
-                    if processor.isRecognizing {
-                        HStack(spacing: 10) {
-                            Label(String(format: "缩放 %.1fx", processor.zoomFactor), systemImage: "plus.magnifyingglass")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.88))
-
-                            Spacer()
-
-                            Button {
-                                resetPreviewTransform()
-                            } label: {
-                                Label("重置取景", systemImage: "arrow.counterclockwise")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.white)
-                            }
-                        }
-                        .padding(.horizontal, isLandscapeLayout ? 10 : 12)
-                        .padding(.vertical, isLandscapeLayout ? 6 : 9)
-                        .background(.black.opacity(0.42))
-                        .clipShape(Capsule())
-                    }
+                if !isLandscapeLayout {
+                    controlPanel
+                        .padding(.horizontal, controlHorizontalPadding)
+                        .padding(.bottom, controlBottomPadding)
                 }
-                .padding(.horizontal, controlHorizontalPadding)
-                .padding(.bottom, controlBottomPadding)
+            }
+
+            if isLandscapeLayout {
+                HStack {
+                    Spacer()
+
+                    controlPanel
+                        .frame(width: 156)
+                        .padding(.trailing, 14)
+                }
+                .padding(.top, 46)
+                .padding(.bottom, 18)
             }
         }
         .sheet(isPresented: $isShowingHistory) {
@@ -267,6 +152,150 @@ struct CameraCaptureView: View {
             processor.stop()
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
+    }
+
+    private var topToolbar: some View {
+        ZStack {
+            HStack {
+                Button {
+                    isShowingPhotoPicker = true
+                } label: {
+                    toolbarIcon("photo.on.rectangle")
+                }
+                .accessibilityLabel("从相册选择")
+
+                Spacer()
+            }
+
+            Button {
+                isShowingHistory = true
+            } label: {
+                toolbarIcon("clock.arrow.circlepath")
+            }
+            .accessibilityLabel("历史记录")
+        }
+    }
+
+    private var controlPanel: some View {
+        VStack(spacing: controlSpacing) {
+            if let message = processor.message {
+                Text(message)
+                    .font(messageFont)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, isLandscapeLayout ? 12 : 14)
+                    .padding(.vertical, isLandscapeLayout ? 6 : 9)
+                    .background(.black.opacity(0.55))
+                    .clipShape(Capsule())
+            }
+
+            Picker("识别模式", selection: $recognitionMode) {
+                ForEach(RecognitionMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(processor.isRecognizing)
+            .controlSize(isLandscapeLayout ? .small : .regular)
+            .padding(isLandscapeLayout ? 3 : 4)
+            .background(.black.opacity(0.36))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            if processor.isRecognizing {
+                if recognitionMode == .manual {
+                    manualActionButtons
+                } else {
+                    Button {
+                        toggleRecognition()
+                    } label: {
+                        Label("停止自动识别", systemImage: "stop.fill")
+                            .font(actionButtonFont)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, actionButtonVerticalPadding)
+                            .background(.red.opacity(0.9))
+                            .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
+                    }
+                    .accessibilityLabel("停止自动识别")
+                }
+            } else {
+                Button {
+                    toggleRecognition()
+                } label: {
+                    Label(recognitionMode.startTitle, systemImage: recognitionMode == .manual ? "camera.fill" : "camera.viewfinder")
+                        .font(actionButtonFont)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, actionButtonVerticalPadding)
+                        .background(.green.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
+                        .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
+                }
+                .accessibilityLabel(recognitionMode.startTitle)
+            }
+
+            if processor.isRecognizing {
+                HStack(spacing: 10) {
+                    Label(String(format: "缩放 %.1fx", processor.zoomFactor), systemImage: "plus.magnifyingglass")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.88))
+
+                    Spacer()
+
+                    Button {
+                        resetPreviewTransform()
+                    } label: {
+                        Label("重置取景", systemImage: "arrow.counterclockwise")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .padding(.horizontal, isLandscapeLayout ? 10 : 12)
+                .padding(.vertical, isLandscapeLayout ? 6 : 9)
+                .background(.black.opacity(0.42))
+                .clipShape(Capsule())
+            }
+        }
+    }
+
+    private var manualActionButtons: some View {
+        let stack = isLandscapeLayout ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 12))
+
+        return stack {
+            Button {
+                toggleRecognition()
+            } label: {
+                Label("停止", systemImage: "stop.fill")
+                    .font(actionButtonFont)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, actionButtonVerticalPadding)
+                    .background(.red.opacity(0.9))
+                    .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
+            }
+            .accessibilityLabel("停止识别")
+
+            Button {
+                processor.captureCurrentFrame()
+            } label: {
+                Label("拍照", systemImage: "camera.fill")
+                    .font(actionButtonFont)
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, actionButtonVerticalPadding)
+                    .background(.white.opacity(0.95))
+                    .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
+            }
+            .accessibilityLabel("拍照")
+        }
+    }
+
+    private func toolbarIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 44, height: 44)
+            .background(.black.opacity(0.45))
+            .clipShape(Circle())
     }
 
     private func updateDeviceOrientation(_ orientation: UIDeviceOrientation) {
