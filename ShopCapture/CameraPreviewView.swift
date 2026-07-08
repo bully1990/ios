@@ -34,10 +34,12 @@ final class PreviewUIView: UIView {
     }
 
     private var guideLayerRect = CGRect.zero
+    private var onCaptureRegionChange: ((CGRect) -> Void)?
 
     override func layoutSubviews() {
         super.layoutSubviews()
         videoPreviewLayer.frame = bounds
+        publishCaptureRegion()
     }
 
     func updateOrientation(_ deviceOrientation: UIDeviceOrientation) {
@@ -48,16 +50,27 @@ final class PreviewUIView: UIView {
         }
 
         connection.videoOrientation = videoOrientation
+        publishCaptureRegion()
     }
 
     func updateGuideLayerRect(_ rect: CGRect, onChange: (CGRect) -> Void) {
+        onCaptureRegionChange = onChange
+
         guard rect.width > 0, rect.height > 0 else {
             return
         }
 
         guideLayerRect = rect
-        let captureRegion = videoPreviewLayer.metadataOutputRectConverted(fromLayerRect: rect)
-        onChange(captureRegion)
+        publishCaptureRegion()
+    }
+
+    private func publishCaptureRegion() {
+        guard guideLayerRect.width > 0, guideLayerRect.height > 0, bounds.width > 0, bounds.height > 0 else {
+            return
+        }
+
+        let captureRegion = videoPreviewLayer.metadataOutputRectConverted(fromLayerRect: guideLayerRect)
+        onCaptureRegionChange?(captureRegion)
     }
 }
 

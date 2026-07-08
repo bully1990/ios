@@ -71,6 +71,7 @@ struct CameraCaptureView: View {
                         updatePreviewSize(newSize)
                     }
             }
+            .ignoresSafeArea()
             .allowsHitTesting(false)
 
             if !processor.isRecognizing {
