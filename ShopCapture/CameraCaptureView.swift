@@ -133,13 +133,13 @@ struct CameraCaptureView: View {
 
                 Spacer()
 
-                VStack(spacing: 12) {
+                VStack(spacing: controlSpacing) {
                     if let message = processor.message {
                         Text(message)
-                            .font(.callout.weight(.semibold))
+                            .font(messageFont)
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
+                            .padding(.horizontal, isLandscapeLayout ? 12 : 14)
+                            .padding(.vertical, isLandscapeLayout ? 6 : 9)
                             .background(.black.opacity(0.55))
                             .clipShape(Capsule())
                     }
@@ -151,7 +151,8 @@ struct CameraCaptureView: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(processor.isRecognizing)
-                    .padding(4)
+                    .controlSize(isLandscapeLayout ? .small : .regular)
+                    .padding(isLandscapeLayout ? 3 : 4)
                     .background(.black.opacity(0.36))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
@@ -162,12 +163,12 @@ struct CameraCaptureView: View {
                                     processor.captureCurrentFrame()
                                 } label: {
                                     Label("拍照识别", systemImage: "camera.fill")
-                                        .font(.headline.weight(.semibold))
+                                        .font(actionButtonFont)
                                         .foregroundStyle(.black)
                                         .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 15)
+                                        .padding(.vertical, actionButtonVerticalPadding)
                                         .background(.white.opacity(0.95))
-                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                        .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
                                 }
                                 .accessibilityLabel("拍照识别")
 
@@ -175,12 +176,12 @@ struct CameraCaptureView: View {
                                     toggleRecognition()
                                 } label: {
                                     Label("停止", systemImage: "stop.fill")
-                                        .font(.headline.weight(.semibold))
+                                        .font(actionButtonFont)
                                         .foregroundStyle(.white)
                                         .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 15)
+                                        .padding(.vertical, actionButtonVerticalPadding)
                                         .background(.red.opacity(0.9))
-                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                        .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
                                 }
                                 .accessibilityLabel("停止识别")
                             }
@@ -189,12 +190,12 @@ struct CameraCaptureView: View {
                                 toggleRecognition()
                             } label: {
                                 Label("停止自动识别", systemImage: "stop.fill")
-                                    .font(.headline.weight(.semibold))
+                                    .font(actionButtonFont)
                                     .foregroundStyle(.white)
                                     .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 15)
+                                    .padding(.vertical, actionButtonVerticalPadding)
                                     .background(.red.opacity(0.9))
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
                             }
                             .accessibilityLabel("停止自动识别")
                         }
@@ -203,12 +204,12 @@ struct CameraCaptureView: View {
                             toggleRecognition()
                         } label: {
                             Label(recognitionMode.startTitle, systemImage: recognitionMode == .manual ? "camera.fill" : "camera.viewfinder")
-                                .font(.headline.weight(.semibold))
+                                .font(actionButtonFont)
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 15)
+                                .padding(.vertical, actionButtonVerticalPadding)
                                 .background(.green.opacity(0.9))
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
                                 .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
                         }
                         .accessibilityLabel(recognitionMode.startTitle)
@@ -230,14 +231,14 @@ struct CameraCaptureView: View {
                                     .foregroundStyle(.white)
                             }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
+                        .padding(.horizontal, isLandscapeLayout ? 10 : 12)
+                        .padding(.vertical, isLandscapeLayout ? 6 : 9)
                         .background(.black.opacity(0.42))
                         .clipShape(Capsule())
                     }
                 }
-                .padding(.horizontal, 22)
-                .padding(.bottom, 28)
+                .padding(.horizontal, controlHorizontalPadding)
+                .padding(.bottom, controlBottomPadding)
             }
         }
         .sheet(isPresented: $isShowingHistory) {
@@ -283,6 +284,38 @@ struct CameraCaptureView: View {
         } else {
             processor.start(automaticDetection: recognitionMode == .automatic)
         }
+    }
+
+    private var isLandscapeLayout: Bool {
+        deviceOrientation == .landscapeLeft || deviceOrientation == .landscapeRight
+    }
+
+    private var controlSpacing: CGFloat {
+        isLandscapeLayout ? 8 : 12
+    }
+
+    private var controlHorizontalPadding: CGFloat {
+        isLandscapeLayout ? 78 : 22
+    }
+
+    private var controlBottomPadding: CGFloat {
+        isLandscapeLayout ? 10 : 28
+    }
+
+    private var actionButtonFont: Font {
+        isLandscapeLayout ? .subheadline.weight(.semibold) : .headline.weight(.semibold)
+    }
+
+    private var messageFont: Font {
+        isLandscapeLayout ? .caption.weight(.semibold) : .callout.weight(.semibold)
+    }
+
+    private var actionButtonVerticalPadding: CGFloat {
+        isLandscapeLayout ? 10 : 15
+    }
+
+    private var actionButtonCornerRadius: CGFloat {
+        isLandscapeLayout ? 13 : 16
     }
 
     private var previewDragGesture: some Gesture {
