@@ -12,6 +12,12 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "17266688538")
     }
 
+    func testExtractsMultiplePhoneNumbers() {
+        let text = "非凡通讯\n电话:17633944176 17633555849"
+        XCTAssertEqual(PhoneNumberExtractor.allPhoneNumbers(in: text), ["17633944176", "17633555849"])
+        XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "17633944176")
+    }
+
     func testExtractsMobileNumberWithCommonOCRDigitMistakes() {
         let text = "电话：17Z 666B B538"
         XCTAssertEqual(PhoneNumberExtractor.firstPhoneNumber(in: text), "17266688538")

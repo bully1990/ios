@@ -32,9 +32,11 @@ enum ImageTextRecognizer {
         let textLines = OCRTextContextBuilder.lines(from: request.results ?? [], image: image)
         let fullText = textLines.map(\.text).joined(separator: "\n")
 
-        guard let phoneNumber = PhoneNumberExtractor.firstPhoneNumber(in: fullText) else {
+        let phoneNumbers = PhoneNumberExtractor.allPhoneNumbers(in: fullText)
+        guard !phoneNumbers.isEmpty else {
             return nil
         }
+        let phoneNumber = phoneNumbers.joined(separator: "、")
 
         return Result(
             fullText: OCRTextContextBuilder.prioritizedText(from: textLines, phoneNumber: phoneNumber),

@@ -6,8 +6,13 @@ enum PhoneNumberExtractor {
     private static let landlinePattern = #"(?<!\d)0\d{2,3}"# + separatorPattern + #"\d{7,8}(?:"# + separatorPattern + #"(?:转|ext\.?|#)"# + separatorPattern + #"\d{1,6})?(?!\d)"#
 
     static func firstPhoneNumber(in text: String) -> String? {
+        allPhoneNumbers(in: text).first
+    }
+
+    static func allPhoneNumbers(in text: String) -> [String] {
         let normalized = normalizeOCRText(text)
         let patterns = [mobilePattern, landlinePattern]
+        var phoneNumbers: [String] = []
 
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
@@ -15,25 +20,27 @@ enum PhoneNumberExtractor {
             }
 
             let range = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
-            guard let match = regex.firstMatch(in: normalized, options: [], range: range),
-                  let swiftRange = Range(match.range, in: normalized) else {
-                continue
-            }
+            let matches = regex.matches(in: normalized, options: [], range: range)
 
-            let candidate = String(normalized[swiftRange].filter(\.isNumber))
+            for match in matches {
+                guard let swiftRange = Range(match.range, in: normalized) else {
+                    continue
+                }
 
-            if isPlausible(candidate, allowsLandline: pattern == landlinePattern) {
-                return candidate
+                let candidate = String(normalized[swiftRange].filter(\.isNumber))
+                if isPlausible(candidate, allowsLandline: pattern == landlinePattern) {
+                    append(candidate, to: &phoneNumbers)
+                }
             }
         }
 
         for candidate in numericRuns(in: normalized) {
             if isPlausible(candidate, allowsLandline: false) {
-                return candidate
+                append(candidate, to: &phoneNumbers)
             }
         }
 
-        return nil
+        return phoneNumbers
     }
 
     private static func normalizeOCRText(_ text: String) -> String {
@@ -82,6 +89,14 @@ enum PhoneNumberExtractor {
         }
 
         current = ""
+    }
+
+    private static func append(_ candidate: String, to phoneNumbers: inout [String]) {
+        guard !phoneNumbers.contains(candidate) else {
+            return
+        }
+
+        phoneNumbers.append(candidate)
     }
 
     private static func isSoftSeparator(_ character: Character) -> Bool {

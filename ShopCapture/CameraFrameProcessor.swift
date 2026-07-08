@@ -400,7 +400,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         let textLines = OCRTextContextBuilder.lines(from: observations, image: image)
         let fullText = textLines.map(\.text).joined(separator: "\n")
 
-        guard let phoneNumber = PhoneNumberExtractor.firstPhoneNumber(in: fullText) else {
+        let phoneNumbers = PhoneNumberExtractor.allPhoneNumbers(in: fullText)
+        guard !phoneNumbers.isEmpty else {
             resetStability()
             if mode == .manual {
                 Task { @MainActor in
@@ -410,6 +411,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             }
             return
         }
+        let phoneNumber = phoneNumbers.joined(separator: "、")
 
         if mode == .automatic {
             if stablePhoneNumber == phoneNumber {

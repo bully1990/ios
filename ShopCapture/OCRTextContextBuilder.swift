@@ -94,7 +94,28 @@ enum OCRTextContextBuilder {
 
     private static func isPhoneLine(_ text: String, phoneNumber: String) -> Bool {
         let digits = text.filter(\.isNumber)
-        return text.contains("电话") || (!phoneNumber.isEmpty && digits == phoneNumber)
+        let phoneNumbers = phoneNumbers(from: phoneNumber)
+        return text.contains("电话") || phoneNumbers.contains { digits.contains($0) }
+    }
+
+    private static func phoneNumbers(from value: String) -> [String] {
+        var numbers: [String] = []
+        var current = ""
+
+        for character in value {
+            if character.isNumber {
+                current.append(character)
+            } else if !current.isEmpty {
+                numbers.append(current)
+                current = ""
+            }
+        }
+
+        if !current.isEmpty {
+            numbers.append(current)
+        }
+
+        return numbers
     }
 
     private static func isSpatiallyRelated(_ rect: CGRect, to phoneRect: CGRect) -> Bool {
