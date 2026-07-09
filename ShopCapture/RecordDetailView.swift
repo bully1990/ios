@@ -16,15 +16,10 @@ struct RecordDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let image = ImageLoader.image(at: record.imagePath) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                } else {
-                    ContentUnavailableView("图片不可用", systemImage: "photo.badge.exclamationmark")
-                        .frame(minHeight: 220)
-                }
+                RecordImage(path: record.imagePath, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 if isEditing {
                     editableFields

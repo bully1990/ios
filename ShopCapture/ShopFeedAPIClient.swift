@@ -245,7 +245,7 @@ struct FeedShop: Identifiable, Sendable {
         self.service = service
         self.details = serviceText.replacingOccurrences(of: "\n", with: " · ")
         self.distance = Self.distanceText(distance)
-        self.address = record.latitude.value == "0.0000000" && record.longitude.value == "0.0000000" ? "位置待补充" : "扫街定位 \(record.latitude.value),\(record.longitude.value)"
+        self.address = record.latitude.value == "0.0000000" && record.longitude.value == "0.0000000" ? "位置待补充" : "扫街已定位"
         self.rating = record.auditStatus.value == "1" ? "4.8" : "4.5"
         self.reviews = "\(max(1, (Int(record.id.value) ?? 1) % 168))条评价"
         self.trustScore = String(format: "%.1f", min(99.8, (record.auditStatus.value == "1" ? 96.0 : 91.0) + Double((Int(record.id.value) ?? 0) % 30) / 10.0))
@@ -348,7 +348,8 @@ struct FeedShop: Identifiable, Sendable {
             reviews: reviews,
             trustScore: trustScore,
             phone: phone,
-            symbol: symbol
+            symbol: symbol,
+            imageURL: imageURL
         )
     }
 }
@@ -401,6 +402,7 @@ struct NearbyFeedShop: Identifiable, Sendable {
             address: address,
             tags: tags,
             symbol: symbol,
+            imageURL: feedShop.imageURL,
             coordinate: CGPoint(x: coordinate.x, y: coordinate.y)
         )
     }

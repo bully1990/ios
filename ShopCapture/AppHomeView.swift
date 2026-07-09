@@ -59,7 +59,8 @@ private struct ServiceHomeView: View {
             reviews: "128条评价",
             trustScore: "96.3",
             phone: "176 3355 5849",
-            symbol: "iphone.gen3"
+            symbol: "iphone.gen3",
+            imageURL: ""
         ),
         RecommendedShop(
             id: "fallback-2",
@@ -74,7 +75,8 @@ private struct ServiceHomeView: View {
             reviews: "86条评价",
             trustScore: "94.1",
             phone: "153 6912 7788",
-            symbol: "washer.fill"
+            symbol: "washer.fill",
+            imageURL: ""
         ),
         RecommendedShop(
             id: "fallback-3",
@@ -89,7 +91,8 @@ private struct ServiceHomeView: View {
             reviews: "53条评价",
             trustScore: "93.2",
             phone: "131 8000 6655",
-            symbol: "lock.shield.fill"
+            symbol: "lock.shield.fill",
+            imageURL: ""
         )
     ]
 
@@ -140,18 +143,6 @@ private struct ServiceHomeView: View {
                     .foregroundStyle(DesignTokens.emerald)
             }
             .font(.system(size: 36, weight: .black, design: .rounded))
-
-            HStack {
-                Text("搜索服务，优选靠谱商家")
-                    .font(.headline)
-                    .foregroundStyle(DesignTokens.secondaryText)
-
-                Spacer()
-
-                Label(district, systemImage: "location")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(DesignTokens.secondaryText)
-            }
 
             HStack(spacing: 12) {
                 Image(systemName: "magnifyingglass")
@@ -213,19 +204,11 @@ private struct ServiceHomeView: View {
     private var recommendationSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
-                Text("为你推荐靠谱店铺")
+                Text("推荐店铺")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(DesignTokens.ink)
 
-                Image(systemName: "info.circle")
-                    .font(.footnote)
-                    .foregroundStyle(DesignTokens.secondaryText)
-
                 Spacer()
-
-                Text("基于位置和服务需求推荐")
-                    .font(.caption)
-                    .foregroundStyle(DesignTokens.secondaryText)
             }
 
             VStack(spacing: 0) {
@@ -280,12 +263,6 @@ private struct ServiceHomeView: View {
                     .font(.title3.weight(.bold))
                     .foregroundStyle(DesignTokens.ink)
                 Spacer()
-                Text("更多服务")
-                    .font(.subheadline)
-                    .foregroundStyle(DesignTokens.secondaryText)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(DesignTokens.secondaryText)
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 10)], spacing: 10) {
@@ -386,20 +363,9 @@ private struct RecommendedShopRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [DesignTokens.emerald, Color(red: 0.05, green: 0.38, blue: 0.34)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                ShopPhoto(path: shop.imageURL, symbol: shop.symbol)
                     .frame(width: 92, height: 86)
-
-                Image(systemName: shop.symbol)
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(width: 92, height: 86)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                 Text("\(shop.rank)")
                     .font(.headline.weight(.black))
@@ -478,6 +444,36 @@ private struct RecommendedShopRow: View {
     }
 }
 
+private struct ShopPhoto: View {
+    let path: String
+    let symbol: String
+
+    private var hasImagePath: Bool {
+        ImageLoader.image(at: path) != nil || ImageLoader.remoteURL(for: path) != nil
+    }
+
+    var body: some View {
+        Group {
+            if hasImagePath {
+                RecordImage(path: path, contentMode: .fill)
+            } else {
+                ZStack {
+                    LinearGradient(
+                        colors: [DesignTokens.emerald, Color(red: 0.05, green: 0.38, blue: 0.34)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+
+                    Image(systemName: symbol)
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+            }
+        }
+        .clipped()
+    }
+}
+
 private struct TrustItem: View {
     let symbol: String
     let title: String
@@ -529,6 +525,7 @@ private struct NearbyDiscoveryView: View {
             address: "建华大街北国商圈",
             tags: ["电话已核验", "30天内更新"],
             symbol: "iphone.gen3",
+            imageURL: "",
             coordinate: CGPoint(x: 0.68, y: 0.34)
         ),
         NearbyShop(
@@ -542,6 +539,7 @@ private struct NearbyDiscoveryView: View {
             address: "万达金街东侧",
             tags: ["近期有评价", "服务稳定"],
             symbol: "takeoutbag.and.cup.and.straw.fill",
+            imageURL: "",
             coordinate: CGPoint(x: 0.36, y: 0.57)
         ),
         NearbyShop(
@@ -555,6 +553,7 @@ private struct NearbyDiscoveryView: View {
             address: "裕华路沿线服务点",
             tags: ["400电话", "夜间服务"],
             symbol: "lock.shield.fill",
+            imageURL: "",
             coordinate: CGPoint(x: 0.78, y: 0.72)
         )
     ]
@@ -589,11 +588,6 @@ private struct NearbyDiscoveryView: View {
                 Text("发现附近")
                     .font(.system(size: 34, weight: .black, design: .rounded))
                     .foregroundStyle(DesignTokens.ink)
-
-                Text("按你所在街区，发现可立即联系的真实服务")
-                    .font(.subheadline)
-                    .foregroundStyle(DesignTokens.secondaryText)
-                    .lineLimit(2)
             }
 
             Spacer()
@@ -660,7 +654,7 @@ private struct NearbyDiscoveryView: View {
     private var recommendedNearby: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("附近优选")
+                Text("附近店铺")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(DesignTokens.ink)
 
@@ -1040,15 +1034,9 @@ private struct NearbyShopCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 13) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(DesignTokens.softEmerald)
-                    .frame(width: 58, height: 58)
-
-                Image(systemName: shop.symbol)
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(DesignTokens.emerald)
-            }
+            ShopPhoto(path: shop.imageURL, symbol: shop.symbol)
+                .frame(width: 58, height: 58)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top) {
@@ -1611,7 +1599,7 @@ private struct StreetRecordCard: View {
         if record.latitude == 0 && record.longitude == 0 {
             return "未定位"
         }
-        return String(format: "%.4f, %.4f", record.latitude, record.longitude)
+        return "已记录位置"
     }
 }
 
@@ -1629,6 +1617,7 @@ struct RecommendedShop: Identifiable {
     let trustScore: String
     let phone: String
     let symbol: String
+    let imageURL: String
 }
 
 struct NearbyShop: Identifiable {
@@ -1642,6 +1631,7 @@ struct NearbyShop: Identifiable {
     let address: String
     let tags: [String]
     let symbol: String
+    let imageURL: String
     let coordinate: CGPoint
 }
 

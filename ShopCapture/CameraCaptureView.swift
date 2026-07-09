@@ -126,7 +126,7 @@ struct CameraCaptureView: View {
                         .position(x: proxy.size.width * guide.midX, y: footerY)
 
                     landscapeSideActionButtons
-                        .frame(width: 118)
+                        .frame(width: 86)
                         .position(x: sideX, y: proxy.size.height * guide.midY)
                 }
                 .ignoresSafeArea()
@@ -295,13 +295,13 @@ struct CameraCaptureView: View {
                 Button {
                     toggleRecognition()
                 } label: {
-                    Label("停止", systemImage: "stop.fill")
+                    Text("停止")
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 44)
+                        .frame(height: 36)
                         .background(.red.opacity(0.9))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .accessibilityLabel("停止识别")
 
@@ -309,13 +309,13 @@ struct CameraCaptureView: View {
                     Button {
                         processor.captureCurrentFrame()
                     } label: {
-                        Label("拍照", systemImage: "camera.fill")
+                        Text("拍照")
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 44)
+                            .frame(height: 36)
                             .background(.white.opacity(0.95))
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .accessibilityLabel("拍照")
                 }
