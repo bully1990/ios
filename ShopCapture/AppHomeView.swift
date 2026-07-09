@@ -752,10 +752,7 @@ private struct MessageCenterView: View {
 }
 
 private struct ProfileCenterView: View {
-    @State private var account: UserAccountSummary?
-    @State private var username = ""
-    @State private var password = ""
-    @State private var siteID = "1"
+    @EnvironmentObject private var authSession: AuthSession
     @State private var alipayAccount = ""
     @State private var alipayName = ""
     @State private var withdrawCoins = ""
@@ -770,13 +767,11 @@ private struct ProfileCenterView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
                         header
-                        if let account {
+                        if let account = authSession.account {
                             accountCard(account)
                             alipayCard
                             withdrawCard(account)
                             logoutButton
-                        } else {
-                            loginCard
                         }
 
                         if let statusMessage {
@@ -798,28 +793,20 @@ private struct ProfileCenterView: View {
             .task {
                 await refreshAccount()
             }
+            .onChange(of: authSession.account?.alipayAccount) { _, newValue in
+                alipayAccount = newValue ?? ""
+            }
+            .onChange(of: authSession.account?.alipayName) { _, newValue in
+                alipayName = newValue ?? ""
+            }
         }
     }
 
     private func refreshAccount() async {
-        do {
-            let summary = try await UserAPIClient.accountInfo()
-            account = summary
-            alipayAccount = summary.alipayAccount
-            alipayName = summary.alipayName
-            statusMessage = nil
-        } catch {
-            do {
-                let profile = try await UserAPIClient.currentUserInfo()
-                let summary = UserAccountSummary.fallback(profile: profile)
-                account = summary
-                alipayAccount = summary.alipayAccount
-                alipayName = summary.alipayName
-                statusMessage = nil
-            } catch {
-                account = nil
-            }
-        }
+        await authSession.refreshAccount()
+        alipayAccount = authSession.account?.alipayAccount ?? ""
+        alipayName = authSession.account?.alipayName ?? ""
+        statusMessage = nil
     }
 
     private var header: some View {
@@ -840,42 +827,6 @@ private struct ProfileCenterView: View {
                 .clipShape(Circle())
                 .overlay(Circle().stroke(DesignTokens.line, lineWidth: 1))
         }
-    }
-
-    private var loginCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("登录")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(DesignTokens.ink)
-
-            TextField("用户名", text: $username)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
-
-            SecureField("密码", text: $password)
-                .textFieldStyle(.roundedBorder)
-
-            TextField("组织ID", text: $siteID)
-                .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
-
-            Button {
-                Task {
-                    await login()
-                }
-            } label: {
-                Text(isWorking ? "登录中..." : "登录")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(DesignTokens.emerald)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-            .disabled(isWorking || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
-        }
-        .profilePanelStyle()
     }
 
     private func accountCard(_ account: UserAccountSummary) -> some View {
@@ -981,28 +932,6 @@ private struct ProfileCenterView: View {
         .disabled(isWorking)
     }
 
-    private func login() async {
-        isWorking = true
-        defer { isWorking = false }
-
-        do {
-            let profile = try await UserAPIClient.login(
-                username: username.trimmingCharacters(in: .whitespacesAndNewlines),
-                password: password,
-                siteID: Int(siteID) ?? 1
-            )
-            let summary = UserAccountSummary.fallback(profile: profile)
-            account = summary
-            alipayAccount = summary.alipayAccount
-            alipayName = summary.alipayName
-            password = ""
-            statusMessage = "登录成功"
-            await refreshAccount()
-        } catch {
-            statusMessage = "登录失败，请检查账号密码"
-        }
-    }
-
     private func saveAlipay() async {
         isWorking = true
         defer { isWorking = false }
@@ -1012,7 +941,7 @@ private struct ProfileCenterView: View {
                 account: alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines),
                 name: alipayName.trimmingCharacters(in: .whitespacesAndNewlines)
             )
-            account = summary
+            authSession.setAccount(summary)
             alipayAccount = summary.alipayAccount
             alipayName = summary.alipayName
             statusMessage = "支付宝已保存"
@@ -1048,19 +977,11 @@ private struct ProfileCenterView: View {
         isWorking = true
         defer { isWorking = false }
 
-        do {
-            try await UserAPIClient.logout()
-        } catch {
-            // Local state still clears so the user can re-login.
-        }
-
-        account = nil
-        username = ""
-        password = ""
+        await authSession.logout()
         withdrawCoins = ""
         alipayAccount = ""
         alipayName = ""
-        statusMessage = "已退出登录"
+        statusMessage = nil
     }
 
     private func canSubmitWithdraw(availableCoins: Int) -> Bool {
