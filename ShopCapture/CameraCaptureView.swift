@@ -115,15 +115,21 @@ struct CameraCaptureView: View {
             }
 
             if isLandscapeLayout {
-                HStack {
-                    Spacer()
+                GeometryReader { proxy in
+                    let guide = CaptureGuide.region
+                    let footerWidth = min(proxy.size.width * guide.width, 520)
+                    let footerY = min(proxy.size.height - 58, proxy.size.height * guide.maxY + 64)
+                    let sideX = min(proxy.size.width - 68, proxy.size.width * guide.maxX + 66)
 
-                    controlPanel
-                        .frame(width: 156)
-                        .padding(.trailing, 14)
+                    landscapeFooterControls
+                        .frame(width: footerWidth)
+                        .position(x: proxy.size.width * guide.midX, y: footerY)
+
+                    landscapeSideActionButtons
+                        .frame(width: 118)
+                        .position(x: sideX, y: proxy.size.height * guide.midY)
                 }
-                .padding(.top, 46)
-                .padding(.bottom, 18)
+                .ignoresSafeArea()
             }
         }
         .sheet(isPresented: $isShowingHistory) {
@@ -234,25 +240,85 @@ struct CameraCaptureView: View {
             }
 
             if processor.isRecognizing {
-                HStack(spacing: 10) {
-                    Label(String(format: "缩放 %.1fx", processor.zoomFactor), systemImage: "plus.magnifyingglass")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.88))
+                zoomResetStrip
+            }
+        }
+    }
 
-                    Spacer()
+    private var landscapeFooterControls: some View {
+        VStack(spacing: 8) {
+            if let message = processor.message {
+                Text(message)
+                    .font(messageFont)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.55))
+                    .clipShape(Capsule())
+            }
 
-                    Button {
-                        resetPreviewTransform()
-                    } label: {
-                        Label("重置取景", systemImage: "arrow.counterclockwise")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                    }
+            Picker("识别模式", selection: $recognitionMode) {
+                ForEach(RecognitionMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
-                .padding(.horizontal, isLandscapeLayout ? 10 : 12)
-                .padding(.vertical, isLandscapeLayout ? 6 : 9)
-                .background(.black.opacity(0.42))
-                .clipShape(Capsule())
+            }
+            .pickerStyle(.segmented)
+            .disabled(processor.isRecognizing)
+            .controlSize(.small)
+            .padding(3)
+            .background(.black.opacity(0.36))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            if processor.isRecognizing {
+                zoomResetStrip
+            } else {
+                Button {
+                    toggleRecognition()
+                } label: {
+                    Label(recognitionMode.startTitle, systemImage: recognitionMode == .manual ? "camera.fill" : "camera.viewfinder")
+                        .font(actionButtonFont)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, actionButtonVerticalPadding)
+                        .background(.green.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
+                        .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
+                }
+                .accessibilityLabel(recognitionMode.startTitle)
+            }
+        }
+    }
+
+    private var landscapeSideActionButtons: some View {
+        VStack(spacing: 8) {
+            if processor.isRecognizing {
+                Button {
+                    toggleRecognition()
+                } label: {
+                    Label("停止", systemImage: "stop.fill")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(.red.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .accessibilityLabel("停止识别")
+
+                if recognitionMode == .manual {
+                    Button {
+                        processor.captureCurrentFrame()
+                    } label: {
+                        Label("拍照", systemImage: "camera.fill")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .background(.white.opacity(0.95))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .accessibilityLabel("拍照")
+                }
             }
         }
     }
@@ -287,6 +353,28 @@ struct CameraCaptureView: View {
             }
             .accessibilityLabel("拍照")
         }
+    }
+
+    private var zoomResetStrip: some View {
+        HStack(spacing: 10) {
+            Label(String(format: "缩放 %.1fx", processor.zoomFactor), systemImage: "plus.magnifyingglass")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.88))
+
+            Spacer()
+
+            Button {
+                resetPreviewTransform()
+            } label: {
+                Label("重置取景", systemImage: "arrow.counterclockwise")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .padding(.horizontal, isLandscapeLayout ? 10 : 12)
+        .padding(.vertical, isLandscapeLayout ? 6 : 9)
+        .background(.black.opacity(0.42))
+        .clipShape(Capsule())
     }
 
     private func toolbarIcon(_ systemName: String) -> some View {
