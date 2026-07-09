@@ -38,6 +38,22 @@ enum UserAPIClient {
         return try await send(request)
     }
 
+    static func register(username: String, password: String, siteID: Int = 999) async throws -> UserProfileSummary {
+        var request = URLRequest(url: endpoint(action: "ajax_register"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
+        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = formBody([
+            "username": username,
+            "password": password,
+            "siteid": "\(siteID)"
+        ])
+
+        return try await send(request)
+    }
+
     static func logout() async throws {
         var request = URLRequest(url: endpoint(action: "ajax_logout"))
         request.httpMethod = "POST"

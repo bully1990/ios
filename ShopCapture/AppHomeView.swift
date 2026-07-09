@@ -1424,7 +1424,7 @@ private struct StreetRecordCard: View {
                 .foregroundStyle(DesignTokens.secondaryText)
 
                 if let timestamp = record.timestamp {
-                    Text(timestamp.formatted(date: .abbreviated, time: .shortened))
+                    Text(ShopDateFormatter.dateTime(timestamp))
                         .font(.caption2)
                         .foregroundStyle(DesignTokens.secondaryText)
                 }

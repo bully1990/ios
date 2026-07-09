@@ -113,7 +113,7 @@ struct RecordDetailView: View {
                 .foregroundStyle(.secondary)
 
             if let timestamp = record.timestamp {
-                Label(timestamp.formatted(date: .abbreviated, time: .standard), systemImage: "calendar")
+                Label(ShopDateFormatter.dateTime(timestamp), systemImage: "calendar")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -131,7 +131,7 @@ struct RecordDetailView: View {
                 .foregroundStyle(.secondary)
 
             if let timestamp = record.timestamp {
-                Label(timestamp.formatted(date: .abbreviated, time: .standard), systemImage: "calendar")
+                Label(ShopDateFormatter.dateTime(timestamp), systemImage: "calendar")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

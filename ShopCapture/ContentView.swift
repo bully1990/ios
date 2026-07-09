@@ -57,6 +57,12 @@ final class AuthSession: ObservableObject {
         await refreshAccount()
     }
 
+    func register(username: String, password: String, siteID: Int = 999) async throws {
+        let profile = try await UserAPIClient.register(username: username, password: password, siteID: siteID)
+        account = UserAccountSummary.fallback(profile: profile)
+        await refreshAccount()
+    }
+
     func setAccount(_ account: UserAccountSummary) {
         self.account = account
     }
@@ -94,12 +100,18 @@ private struct LaunchCheckingView: View {
 }
 
 private struct AppLoginView: View {
+    private enum Mode {
+        case login
+        case register
+    }
+
     @EnvironmentObject private var authSession: AuthSession
+    @State private var mode: Mode = .login
     @State private var username = "demo"
     @State private var password = "123456"
-    @State private var siteID = "999"
     @State private var message: String?
     @State private var isWorking = false
+    private let siteID = 999
 
     var body: some View {
         ZStack {
@@ -115,13 +127,9 @@ private struct AppLoginView: View {
 
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("登录")
+                    Text(mode == .login ? "登录" : "注册")
                         .font(.system(size: 38, weight: .black, design: .rounded))
                         .foregroundStyle(Color(red: 0.05, green: 0.12, blue: 0.10))
-
-                    Text("登录后开始浏览、扫街和管理账户")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color(red: 0.37, green: 0.43, blue: 0.40))
                 }
 
                 VStack(spacing: 14) {
@@ -134,18 +142,14 @@ private struct AppLoginView: View {
                     SecureField("密码", text: $password)
                         .textContentType(.password)
                         .loginFieldStyle()
-
-                    TextField("组织ID", text: $siteID)
-                        .keyboardType(.numberPad)
-                        .loginFieldStyle()
                 }
 
                 Button {
                     Task {
-                        await login()
+                        await submit()
                     }
                 } label: {
-                    Text(isWorking ? "登录中..." : "登录进入")
+                    Text(isWorking ? "处理中..." : (mode == .login ? "登录进入" : "注册进入"))
                         .font(.headline.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -154,6 +158,16 @@ private struct AppLoginView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .disabled(isWorking || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
+
+                Button {
+                    switchMode()
+                } label: {
+                    Text(mode == .login ? "还没有账号？立即注册" : "已有账号？返回登录")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color(red: 0.05, green: 0.42, blue: 0.33))
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(isWorking)
 
                 if let message {
                     Text(message)
@@ -174,20 +188,40 @@ private struct AppLoginView: View {
         }
     }
 
-    private func login() async {
+    private func submit() async {
         isWorking = true
         defer { isWorking = false }
 
         do {
-            try await authSession.login(
-                username: username.trimmingCharacters(in: .whitespacesAndNewlines),
-                password: password,
-                siteID: Int(siteID) ?? 1
-            )
+            if mode == .login {
+                try await authSession.login(
+                    username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+                    password: password,
+                    siteID: siteID
+                )
+            } else {
+                try await authSession.register(
+                    username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+                    password: password,
+                    siteID: siteID
+                )
+            }
             password = ""
             message = nil
         } catch {
-            message = "登录失败，请检查账号密码"
+            message = mode == .login ? "登录失败，请检查账号密码" : "注册失败，请更换账号后重试"
+        }
+    }
+
+    private func switchMode() {
+        mode = mode == .login ? .register : .login
+        message = nil
+        if mode == .login {
+            username = "demo"
+            password = "123456"
+        } else {
+            username = ""
+            password = ""
         }
     }
 }

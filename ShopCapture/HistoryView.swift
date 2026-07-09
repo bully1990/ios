@@ -1,6 +1,19 @@
 import CoreData
 import SwiftUI
 
+enum ShopDateFormatter {
+    private static let dateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    static func dateTime(_ date: Date) -> String {
+        dateTimeFormatter.string(from: date)
+    }
+}
+
 struct HistoryView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
@@ -168,6 +181,12 @@ private struct HistoryRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
+
+                if let timestamp = record.timestamp {
+                    Text(ShopDateFormatter.dateTime(timestamp))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 4)
