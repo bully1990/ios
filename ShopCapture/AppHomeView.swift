@@ -991,9 +991,21 @@ private struct StreetRecordList: View {
     let pendingRecords: [ShopRecord]
     let approvedRecords: [ShopRecord]
     let rejectedRecords: [ShopRecord]
+    @State private var selectedStatus: StreetRecordStatus = .pending
 
     private var totalCount: Int {
         pendingRecords.count + approvedRecords.count + rejectedRecords.count
+    }
+
+    private var selectedRecords: [ShopRecord] {
+        switch selectedStatus {
+        case .pending:
+            return pendingRecords
+        case .approved:
+            return approvedRecords
+        case .rejected:
+            return rejectedRecords
+        }
     }
 
     var body: some View {
@@ -1021,39 +1033,68 @@ private struct StreetRecordList: View {
                 .background(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             } else {
-                StreetRecordSection(title: "待审核", records: pendingRecords, color: .orange)
-                StreetRecordSection(title: "已通过", records: approvedRecords, color: DesignTokens.emerald)
-                StreetRecordSection(title: "未通过", records: rejectedRecords, color: .red)
+                Picker("记录状态", selection: $selectedStatus) {
+                    ForEach(StreetRecordStatus.allCases) { status in
+                        Text("\(status.title) \(count(for: status))").tag(status)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                StreetRecordStatusList(status: selectedStatus, records: selectedRecords)
             }
+        }
+    }
+
+    private func count(for status: StreetRecordStatus) -> Int {
+        switch status {
+        case .pending:
+            return pendingRecords.count
+        case .approved:
+            return approvedRecords.count
+        case .rejected:
+            return rejectedRecords.count
         }
     }
 }
 
-private struct StreetRecordSection: View {
-    let title: String
+private enum StreetRecordStatus: String, CaseIterable, Identifiable {
+    case pending
+    case approved
+    case rejected
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .pending:
+            return "待审核"
+        case .approved:
+            return "已通过"
+        case .rejected:
+            return "未通过"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .pending:
+            return .orange
+        case .approved:
+            return DesignTokens.emerald
+        case .rejected:
+            return .red
+        }
+    }
+}
+
+private struct StreetRecordStatusList: View {
+    let status: StreetRecordStatus
     let records: [ShopRecord]
-    let color: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(color)
-
-                Text("\(records.count)")
-                    .font(.caption.weight(.black))
-                    .foregroundStyle(color)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(color.opacity(0.12))
-                    .clipShape(Capsule())
-
-                Spacer()
-            }
-
+        VStack(spacing: 12) {
             if records.isEmpty {
-                Text("暂无\(title)记录")
+                Text("暂无\(status.title)记录")
                     .font(.caption)
                     .foregroundStyle(DesignTokens.secondaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1066,7 +1107,7 @@ private struct StreetRecordSection: View {
                         NavigationLink {
                             RecordDetailView(record: record)
                         } label: {
-                            StreetRecordCard(record: record, statusTitle: title, statusColor: color)
+                            StreetRecordCard(record: record, statusTitle: status.title, statusColor: status.color)
                         }
                         .buttonStyle(.plain)
                     }
