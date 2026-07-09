@@ -4,6 +4,23 @@ enum QwenVisionClient {
     private static let endpoint = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")!
     private static let model = "qwen3.5-omni-plus"
 
+    enum QwenVisionError: LocalizedError {
+        case missingAPIKey
+        case invalidImage
+        case emptyResponse
+
+        var errorDescription: String? {
+            switch self {
+            case .missingAPIKey:
+                return "未配置 DASHSCOPE_API_KEY"
+            case .invalidImage:
+                return "图片数据无效"
+            case .emptyResponse:
+                return "AI 未返回识别结果"
+            }
+        }
+    }
+
     static func summarize(imageData: Data, phoneNumber: String = "") async throws -> ShopTextSummary? {
         let dataURL = "data:image/jpeg;base64,\(imageData.base64EncodedString())"
         return try await summarize(imageURL: dataURL, phoneNumber: phoneNumber)
@@ -12,7 +29,7 @@ enum QwenVisionClient {
     static func summarize(imageURL: String, phoneNumber: String) async throws -> ShopTextSummary? {
         let apiKey = configuredAPIKey()
         guard !apiKey.isEmpty, let urlString = normalizedImageURLString(from: imageURL) else {
-            return nil
+            throw apiKey.isEmpty ? QwenVisionError.missingAPIKey : QwenVisionError.invalidImage
         }
 
         var request = URLRequest(url: endpoint)
@@ -31,7 +48,7 @@ enum QwenVisionClient {
 
         let completion = try JSONDecoder().decode(QwenCompletionResponse.self, from: data)
         guard let content = completion.choices.first?.message.content else {
-            return nil
+            throw QwenVisionError.emptyResponse
         }
 
         let jsonText = extractJSONObject(from: content)
@@ -41,11 +58,13 @@ enum QwenVisionClient {
 
         let summary = try JSONDecoder().decode(QwenSummaryResponse.self, from: jsonData)
         let phones = summary.phones.joined(separator: "、")
+        let allRecognizedText = [phones, summary.name ?? "", summary.services ?? ""].joined(separator: "、")
+        let recognizedPhones = PhoneNumberExtractor.allPhoneNumbers(in: allRecognizedText).joined(separator: "、")
         let trustedPhoneText = PhoneNumberExtractor.allPhoneNumbers(in: phones).isEmpty ? phoneNumber : phones
         let result = ShopTextSummary(
             shopName: cleaned(summary.name),
             serviceContent: cleaned(summary.services),
-            phoneNumber: cleaned(trustedPhoneText)
+            phoneNumber: cleaned(recognizedPhones.isEmpty ? trustedPhoneText : recognizedPhones)
         )
 
         return ShopTextSummarizer.refine(result, fullText: trustedPhoneText)
@@ -218,6 +237,30 @@ private struct QwenSummaryResponse: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.name = try container.decodeIfPresent(String.self, forKey: .name)
         self.services = try container.decodeIfPresent(String.self, forKey: .services)
-        self.phones = (try? container.decode([String].self, forKey: .phones)) ?? []
+        self.phones = Self.decodePhones(from: container)
+    }
+
+    private static func decodePhones(from container: KeyedDecodingContainer<CodingKeys>) -> [String] {
+        if let values = try? container.decode([String].self, forKey: .phones) {
+            return values
+        }
+
+        if let values = try? container.decode([Int].self, forKey: .phones) {
+            return values.map(String.init)
+        }
+
+        if let values = try? container.decode([Double].self, forKey: .phones) {
+            return values.map { String(format: "%.0f", $0) }
+        }
+
+        if let value = try? container.decode(String.self, forKey: .phones) {
+            return PhoneNumberExtractor.allPhoneNumbers(in: value)
+        }
+
+        if let value = try? container.decode(Int.self, forKey: .phones) {
+            return [String(value)]
+        }
+
+        return []
     }
 }

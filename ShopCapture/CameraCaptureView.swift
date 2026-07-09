@@ -527,6 +527,7 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
     private weak var processor: CameraFrameProcessor?
     private weak var locationProvider: LocationProvider?
     private var isSaving = false
+    private var lastRecognitionFailureMessage: String?
 
     func configure(processor: CameraFrameProcessor, locationProvider: LocationProvider) {
         self.processor = processor
@@ -553,7 +554,7 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
                   !PhoneNumberExtractor.allPhoneNumbers(in: phoneNumber).isEmpty else {
                 isSaving = false
                 processor.markSaveFailed(URLError(.cannotParseResponse))
-                processor.setMessage("未识别到电话号码")
+                processor.setMessage(lastRecognitionFailureMessage ?? "AI未识别到电话号码")
                 return
             }
 
@@ -582,6 +583,7 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
     }
 
     private func summarize(frame: DetectedShopFrame, processor: CameraFrameProcessor) async -> ShopTextSummary? {
+        lastRecognitionFailureMessage = nil
         processor.setMessage("正在用 AI 识别")
 
         guard let imageData = frame.image.jpegData(compressionQuality: 0.78) else {
@@ -589,11 +591,20 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
         }
 
         do {
-            return try await QwenVisionClient.summarize(imageData: imageData, phoneNumber: frame.phoneNumber)
+            let summary = try await QwenVisionClient.summarize(imageData: imageData, phoneNumber: frame.phoneNumber)
+            if summary?.phoneNumber == nil || PhoneNumberExtractor.allPhoneNumbers(in: summary?.phoneNumber ?? "").isEmpty {
+                lastRecognitionFailureMessage = "AI未识别到电话号码"
+            }
+            return summary
+        } catch QwenVisionClient.QwenVisionError.missingAPIKey {
+            lastRecognitionFailureMessage = "未配置DASHSCOPE_API_KEY"
+            print("Warning: Qwen vision summary failed: missing API key")
         } catch {
+            lastRecognitionFailureMessage = "AI识别失败，请重试"
             print("Warning: Qwen vision summary failed: \(error.localizedDescription)")
-            return nil
         }
+
+        return nil
     }
 
     func cameraFrameProcessor(_ processor: CameraFrameProcessor, didChangeMessage message: String?) {
