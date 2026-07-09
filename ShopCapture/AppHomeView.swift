@@ -752,7 +752,15 @@ private struct MessageCenterView: View {
 }
 
 private struct ProfileCenterView: View {
-    @State private var profile: UserProfileSummary?
+    @State private var account: UserAccountSummary?
+    @State private var username = ""
+    @State private var password = ""
+    @State private var siteID = "1"
+    @State private var alipayAccount = ""
+    @State private var alipayName = ""
+    @State private var withdrawCoins = ""
+    @State private var statusMessage: String?
+    @State private var isWorking = false
 
     var body: some View {
         NavigationStack {
@@ -762,7 +770,24 @@ private struct ProfileCenterView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
                         header
-                        profileCard
+                        if let account {
+                            accountCard(account)
+                            alipayCard
+                            withdrawCard(account)
+                            logoutButton
+                        } else {
+                            loginCard
+                        }
+
+                        if let statusMessage {
+                            Text(statusMessage)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(DesignTokens.secondaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14)
+                                .background(.white.opacity(0.72))
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        }
                     }
                     .padding(.horizontal, 18)
                     .padding(.top, 18)
@@ -771,16 +796,29 @@ private struct ProfileCenterView: View {
             }
             .navigationBarHidden(true)
             .task {
-                await refreshProfile()
+                await refreshAccount()
             }
         }
     }
 
-    private func refreshProfile() async {
+    private func refreshAccount() async {
         do {
-            profile = try await UserAPIClient.currentUserInfo()
+            let summary = try await UserAPIClient.accountInfo()
+            account = summary
+            alipayAccount = summary.alipayAccount
+            alipayName = summary.alipayName
+            statusMessage = nil
         } catch {
-            profile = nil
+            do {
+                let profile = try await UserAPIClient.currentUserInfo()
+                let summary = UserAccountSummary.fallback(profile: profile)
+                account = summary
+                alipayAccount = summary.alipayAccount
+                alipayName = summary.alipayName
+                statusMessage = nil
+            } catch {
+                account = nil
+            }
         }
     }
 
@@ -804,28 +842,239 @@ private struct ProfileCenterView: View {
         }
     }
 
-    private var profileCard: some View {
+    private var loginCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let profile {
-                ProfileInfoRow(title: "名称", value: profile.displayName, symbol: "person.fill")
-                Divider()
-                ProfileInfoRow(title: "账号", value: profile.accountLine, symbol: "number")
-                Divider()
-                ProfileInfoRow(title: "身份", value: profile.roleName, symbol: "shield.lefthalf.filled")
-                Divider()
-                ProfileInfoRow(title: "位置", value: profile.locationName, symbol: "location.fill")
-                Divider()
-                ProfileInfoRow(title: "状态", value: profile.syncStatus, symbol: "checkmark.circle.fill")
-            } else {
-                ContentUnavailableView(
-                    "未获取到账户信息",
-                    systemImage: "person.crop.circle.badge.exclamationmark",
-                    description: Text("请稍后重新进入或检查登录状态")
-                )
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+            Text("登录")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(DesignTokens.ink)
+
+            TextField("用户名", text: $username)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+
+            SecureField("密码", text: $password)
+                .textFieldStyle(.roundedBorder)
+
+            TextField("组织ID", text: $siteID)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+
+            Button {
+                Task {
+                    await login()
+                }
+            } label: {
+                Text(isWorking ? "登录中..." : "登录")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(DesignTokens.emerald)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
+            .disabled(isWorking || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
         }
+        .profilePanelStyle()
+    }
+
+    private func accountCard(_ account: UserAccountSummary) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .lastTextBaseline) {
+                Text("\(account.coins)")
+                    .font(.system(size: 42, weight: .black, design: .rounded))
+                    .foregroundStyle(DesignTokens.ink)
+
+                Text("金币")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(DesignTokens.secondaryText)
+
+                Spacer()
+            }
+
+            Divider()
+
+            ProfileInfoRow(title: "名称", value: account.profile.displayName, symbol: "person.fill")
+            Divider()
+            ProfileInfoRow(title: "账号", value: account.profile.accountLine, symbol: "number")
+            Divider()
+            ProfileInfoRow(title: "身份", value: account.profile.roleName, symbol: "shield.lefthalf.filled")
+            Divider()
+            ProfileInfoRow(title: "状态", value: account.profile.syncStatus, symbol: "checkmark.circle.fill")
+        }
+        .profilePanelStyle()
+    }
+
+    private var alipayCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("收款支付宝")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(DesignTokens.ink)
+
+            TextField("支付宝账号", text: $alipayAccount)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+
+            TextField("收款姓名", text: $alipayName)
+                .textFieldStyle(.roundedBorder)
+
+            Button {
+                Task {
+                    await saveAlipay()
+                }
+            } label: {
+                Text(isWorking ? "保存中..." : "保存支付宝")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(DesignTokens.ink)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .disabled(isWorking || alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || alipayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .profilePanelStyle()
+    }
+
+    private func withdrawCard(_ account: UserAccountSummary) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("金币提现")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(DesignTokens.ink)
+
+            TextField("提现金币数量", text: $withdrawCoins)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+
+            Button {
+                Task {
+                    await submitWithdraw()
+                }
+            } label: {
+                Text(isWorking ? "提交中..." : "提交提现申请")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(canSubmitWithdraw(availableCoins: account.coins) ? DesignTokens.emerald : Color.gray.opacity(0.55))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .disabled(isWorking || !canSubmitWithdraw(availableCoins: account.coins))
+        }
+        .profilePanelStyle()
+    }
+
+    private var logoutButton: some View {
+        Button(role: .destructive) {
+            Task {
+                await logout()
+            }
+        } label: {
+            Text("退出登录")
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .background(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .disabled(isWorking)
+    }
+
+    private func login() async {
+        isWorking = true
+        defer { isWorking = false }
+
+        do {
+            let profile = try await UserAPIClient.login(
+                username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+                password: password,
+                siteID: Int(siteID) ?? 1
+            )
+            let summary = UserAccountSummary.fallback(profile: profile)
+            account = summary
+            alipayAccount = summary.alipayAccount
+            alipayName = summary.alipayName
+            password = ""
+            statusMessage = "登录成功"
+            await refreshAccount()
+        } catch {
+            statusMessage = "登录失败，请检查账号密码"
+        }
+    }
+
+    private func saveAlipay() async {
+        isWorking = true
+        defer { isWorking = false }
+
+        do {
+            let summary = try await UserAPIClient.saveAlipay(
+                account: alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines),
+                name: alipayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            account = summary
+            alipayAccount = summary.alipayAccount
+            alipayName = summary.alipayName
+            statusMessage = "支付宝已保存"
+        } catch {
+            statusMessage = "支付宝保存失败"
+        }
+    }
+
+    private func submitWithdraw() async {
+        guard let coins = Int(withdrawCoins) else {
+            statusMessage = "请输入正确的金币数量"
+            return
+        }
+
+        isWorking = true
+        defer { isWorking = false }
+
+        do {
+            try await UserAPIClient.submitWithdraw(
+                coins: coins,
+                alipayAccount: alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines),
+                alipayName: alipayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            withdrawCoins = ""
+            statusMessage = "提现申请已提交"
+            await refreshAccount()
+        } catch {
+            statusMessage = "提现申请提交失败"
+        }
+    }
+
+    private func logout() async {
+        isWorking = true
+        defer { isWorking = false }
+
+        do {
+            try await UserAPIClient.logout()
+        } catch {
+            // Local state still clears so the user can re-login.
+        }
+
+        account = nil
+        username = ""
+        password = ""
+        withdrawCoins = ""
+        alipayAccount = ""
+        alipayName = ""
+        statusMessage = "已退出登录"
+    }
+
+    private func canSubmitWithdraw(availableCoins: Int) -> Bool {
+        guard let coins = Int(withdrawCoins), coins > 0, coins <= availableCoins else {
+            return false
+        }
+        return !alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !alipayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+private extension View {
+    func profilePanelStyle() -> some View {
+        self
         .padding(16)
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))

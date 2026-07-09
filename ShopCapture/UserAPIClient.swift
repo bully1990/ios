@@ -6,14 +6,17 @@ struct UserProfileSummary: Sendable {
     let roleName: String
     let locationName: String
     let syncStatus: String
+}
 
-    static let placeholder = UserProfileSummary(
-        displayName: "扫街合伙人",
-        accountLine: "手机号 304****4040",
-        roleName: "LV.6 核实官",
-        locationName: "石家庄",
-        syncStatus: "未登录 · 演示数据"
-    )
+struct UserAccountSummary: Sendable {
+    let profile: UserProfileSummary
+    let coins: Int
+    let alipayAccount: String
+    let alipayName: String
+
+    static func fallback(profile: UserProfileSummary) -> UserAccountSummary {
+        UserAccountSummary(profile: profile, coins: 0, alipayAccount: "", alipayName: "")
+    }
 }
 
 enum UserAPIClient {
@@ -23,6 +26,7 @@ enum UserAPIClient {
         var request = URLRequest(url: endpoint(action: "ajax_login"))
         request.httpMethod = "POST"
         request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = formBody([
@@ -34,12 +38,68 @@ enum UserAPIClient {
         return try await send(request)
     }
 
+    static func logout() async throws {
+        var request = URLRequest(url: endpoint(action: "ajax_logout"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.httpShouldHandleCookies = true
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
     static func currentUserInfo() async throws -> UserProfileSummary {
         var request = URLRequest(url: endpoint(action: "ajax_user_info"))
         request.httpMethod = "GET"
         request.timeoutInterval = 15
+        request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return try await send(request)
+    }
+
+    static func accountInfo() async throws -> UserAccountSummary {
+        var request = URLRequest(url: endpoint(action: "ajax_account_info"))
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.httpShouldHandleCookies = true
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let data = try await sendData(request)
+        return UserAccountSummary(data: data)
+    }
+
+    static func saveAlipay(account: String, name: String) async throws -> UserAccountSummary {
+        var request = URLRequest(url: endpoint(action: "ajax_save_alipay"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
+        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = formBody([
+            "alipay_account": account,
+            "alipay_name": name
+        ])
+
+        let data = try await sendData(request)
+        return UserAccountSummary(data: data)
+    }
+
+    static func submitWithdraw(coins: Int, alipayAccount: String, alipayName: String) async throws {
+        var request = URLRequest(url: endpoint(action: "ajax_withdraw_request"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
+        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = formBody([
+            "coins": "\(coins)",
+            "alipay_account": alipayAccount,
+            "alipay_name": alipayName
+        ])
+
+        _ = try await sendData(request)
     }
 
     private static func endpoint(action: String) -> URL {
@@ -53,6 +113,11 @@ enum UserAPIClient {
     }
 
     private static func send(_ request: URLRequest) async throws -> UserProfileSummary {
+        let data = try await sendData(request)
+        return UserProfileSummary(data: data)
+    }
+
+    private static func sendData(_ request: URLRequest) async throws -> [String: Any] {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode) else {
@@ -61,12 +126,11 @@ enum UserAPIClient {
 
         let object = try JSONSerialization.jsonObject(with: data)
         guard let envelope = object as? [String: Any],
-              responseCode(from: envelope["code"]) == 200,
-              let data = envelope["data"] as? [String: Any] else {
+              responseCode(from: envelope["code"]) == 200 else {
             throw URLError(.cannotParseResponse)
         }
 
-        return UserProfileSummary(data: data)
+        return envelope["data"] as? [String: Any] ?? [:]
     }
 
     private static func responseCode(from value: Any?) -> Int {
@@ -89,7 +153,9 @@ enum UserAPIClient {
     }
 
     private static func escape(_ value: String) -> String {
-        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=?")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }
 
@@ -155,5 +221,43 @@ private extension UserProfileSummary {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: Date())
+    }
+}
+
+private extension UserAccountSummary {
+    init(data: [String: Any]) {
+        let profileData = data["user"] as? [String: Any] ?? data
+        let accountData = data["account"] as? [String: Any] ?? data
+
+        self.profile = UserProfileSummary(data: profileData)
+        self.coins = Self.intValue(Self.firstValue(
+            in: accountData,
+            keys: ["coins", "coin", "gold", "金币", "balance", "points", "point"]
+        ))
+        self.alipayAccount = UserProfileSummary.firstNonEmpty([
+            UserProfileSummary.stringValue(Self.firstValue(in: accountData, keys: ["alipay_account", "alipay", "支付宝账号"])),
+            UserProfileSummary.stringValue(Self.firstValue(in: accountData, keys: ["payment_account"]))
+        ])
+        self.alipayName = UserProfileSummary.firstNonEmpty([
+            UserProfileSummary.stringValue(Self.firstValue(in: accountData, keys: ["alipay_name", "realname", "收款姓名"])),
+            profile.displayName
+        ])
+    }
+
+    static func firstValue(in data: [String: Any], keys: [String]) -> Any? {
+        keys.lazy.compactMap { data[$0] }.first
+    }
+
+    static func intValue(_ value: Any?) -> Int {
+        switch value {
+        case let int as Int:
+            return int
+        case let double as Double:
+            return Int(double)
+        case let string as String:
+            return Int(string.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        default:
+            return 0
+        }
     }
 }
