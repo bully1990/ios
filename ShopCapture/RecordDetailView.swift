@@ -1,6 +1,7 @@
 import CoreLocation
 import MapKit
 import SwiftUI
+import UIKit
 
 struct RecordDetailView: View {
     @Environment(\.dismiss) private var dismiss
@@ -11,7 +12,6 @@ struct RecordDetailView: View {
     @State private var draftShopName = ""
     @State private var draftServiceContent = ""
     @State private var draftPhoneNumber = ""
-    @State private var draftFullText = ""
 
     var body: some View {
         ScrollView {
@@ -33,25 +33,18 @@ struct RecordDetailView: View {
                 .frame(height: 260)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("完整识别文字")
-                        .font(.headline)
-
-                    if isEditing {
-                        TextEditor(text: $draftFullText)
-                            .frame(minHeight: 160)
-                            .padding(8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(.secondary.opacity(0.25))
-                            )
-                    } else {
-                        Text(record.fullText?.isEmpty == false ? record.fullText ?? "" : "无识别文字")
-                            .font(.body)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                Button {
+                    openDirections()
+                } label: {
+                    Label("导航到目的地", systemImage: "map.fill")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(hasValidLocation ? Color.accentColor : Color.gray.opacity(0.55))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
+                .disabled(!hasValidLocation)
             }
             .padding()
         }
@@ -168,6 +161,23 @@ struct RecordDetailView: View {
         ))
     }
 
+    private var hasValidLocation: Bool {
+        record.latitude != 0 && record.longitude != 0
+    }
+
+    private func openDirections() {
+        guard hasValidLocation else {
+            return
+        }
+
+        let placemark = MKPlacemark(coordinate: coordinate)
+        let mapItem = MKMapItem(placemark: placemark)
+        mapItem.name = record.shopName?.isEmpty == false ? record.shopName : "门店位置"
+        mapItem.openInMaps(launchOptions: [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
+        ])
+    }
+
     private func deleteRecord() {
         do {
             try ShopRecordStore.delete(record, context: viewContext)
@@ -191,7 +201,6 @@ struct RecordDetailView: View {
         draftShopName = record.shopName ?? ""
         draftServiceContent = record.serviceContent ?? ""
         draftPhoneNumber = record.phoneNumber ?? ""
-        draftFullText = record.fullText ?? ""
     }
 
     private func saveEdits() {
@@ -201,7 +210,7 @@ struct RecordDetailView: View {
                 shopName: draftShopName,
                 serviceContent: draftServiceContent,
                 phoneNumber: draftPhoneNumber,
-                fullText: draftFullText,
+                fullText: record.fullText,
                 context: viewContext
             )
             isEditing = false

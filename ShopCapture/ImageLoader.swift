@@ -5,7 +5,7 @@ enum ImageLoader {
     private static let remoteBaseURL = URL(string: "https://api.gmpebr.com")!
 
     static func image(at path: String?) -> UIImage? {
-        guard let path, !path.isEmpty else {
+        guard let path = path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
             return nil
         }
 
@@ -13,8 +13,16 @@ enum ImageLoader {
             return UIImage(contentsOfFile: path)
         }
 
-        let url = URL(fileURLWithPath: path)
-        return UIImage(contentsOfFile: url.path)
+        if let url = URL(string: path), url.isFileURL, FileManager.default.fileExists(atPath: url.path) {
+            return UIImage(contentsOfFile: url.path)
+        }
+
+        let fileURL = URL(fileURLWithPath: path)
+        if let image = UIImage(contentsOfFile: fileURL.path) {
+            return image
+        }
+
+        return imageFromCurrentDocuments(namedLike: fileURL.lastPathComponent)
     }
 
     static func remoteURL(for path: String?) -> URL? {
@@ -41,6 +49,24 @@ enum ImageLoader {
         }
 
         return nil
+    }
+
+    private static func imageFromCurrentDocuments(namedLike fileName: String) -> UIImage? {
+        guard !fileName.isEmpty,
+              let documents = try? FileManager.default.url(
+                for: .documentDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: false
+              ) else {
+            return nil
+        }
+
+        let currentURL = documents
+            .appendingPathComponent("ShopImages", isDirectory: true)
+            .appendingPathComponent(fileName)
+
+        return UIImage(contentsOfFile: currentURL.path)
     }
 }
 

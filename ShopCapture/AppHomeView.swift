@@ -631,27 +631,63 @@ private struct NearbyDiscoveryView: View {
 
 private struct StreetVerifyTaskView: View {
     @State private var isShowingCapture = false
+    @State private var selectedStatus: StreetRecordStatus = .pending
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(keyPath: \ShopRecord.timestamp, ascending: false)],
         animation: .default
     )
     private var records: FetchedResults<ShopRecord>
 
+    private var pendingRecords: [ShopRecord] {
+        Array(records)
+    }
+
+    private var approvedRecords: [ShopRecord] {
+        []
+    }
+
+    private var rejectedRecords: [ShopRecord] {
+        []
+    }
+
+    private var selectedRecords: [ShopRecord] {
+        switch selectedStatus {
+        case .pending:
+            return pendingRecords
+        case .approved:
+            return approvedRecords
+        case .rejected:
+            return rejectedRecords
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 DesignTokens.background.ignoresSafeArea()
 
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 14) {
                         Text("扫街")
                             .font(.largeTitle.weight(.black))
                             .foregroundStyle(DesignTokens.ink)
 
-                        StreetRecordList(pendingRecords: Array(records), approvedRecords: [], rejectedRecords: [])
+                        Picker("记录状态", selection: $selectedStatus) {
+                            ForEach(StreetRecordStatus.allCases) { status in
+                                Text("\(status.title) \(count(for: status))").tag(status)
+                            }
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .padding(18)
-                    .padding(.bottom, 78)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+
+                    ScrollView(showsIndicators: false) {
+                        StreetRecordList(status: selectedStatus, records: selectedRecords)
+                            .padding(.horizontal, 18)
+                            .padding(.top, 4)
+                            .padding(.bottom, 96)
+                    }
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -688,6 +724,17 @@ private struct StreetVerifyTaskView: View {
                     .padding(.top, 18)
                 }
             }
+        }
+    }
+
+    private func count(for status: StreetRecordStatus) -> Int {
+        switch status {
+        case .pending:
+            return pendingRecords.count
+        case .approved:
+            return approvedRecords.count
+        case .rejected:
+            return rejectedRecords.count
         }
     }
 }
@@ -988,72 +1035,11 @@ private struct StaticFeaturePage: View {
 }
 
 private struct StreetRecordList: View {
-    let pendingRecords: [ShopRecord]
-    let approvedRecords: [ShopRecord]
-    let rejectedRecords: [ShopRecord]
-    @State private var selectedStatus: StreetRecordStatus = .pending
-
-    private var totalCount: Int {
-        pendingRecords.count + approvedRecords.count + rejectedRecords.count
-    }
-
-    private var selectedRecords: [ShopRecord] {
-        switch selectedStatus {
-        case .pending:
-            return pendingRecords
-        case .approved:
-            return approvedRecords
-        case .rejected:
-            return rejectedRecords
-        }
-    }
+    let status: StreetRecordStatus
+    let records: [ShopRecord]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("扫街记录")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(DesignTokens.ink)
-
-                Spacer()
-
-                Text("\(totalCount) 条")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(DesignTokens.secondaryText)
-            }
-
-            if totalCount == 0 {
-                ContentUnavailableView(
-                    "暂无扫街记录",
-                    systemImage: "text.viewfinder",
-                    description: Text("点击开始扫街录入，识别后的店铺会显示在这里。")
-                )
-                .padding(.vertical, 16)
-                .frame(maxWidth: .infinity)
-                .background(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            } else {
-                Picker("记录状态", selection: $selectedStatus) {
-                    ForEach(StreetRecordStatus.allCases) { status in
-                        Text("\(status.title) \(count(for: status))").tag(status)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                StreetRecordStatusList(status: selectedStatus, records: selectedRecords)
-            }
-        }
-    }
-
-    private func count(for status: StreetRecordStatus) -> Int {
-        switch status {
-        case .pending:
-            return pendingRecords.count
-        case .approved:
-            return approvedRecords.count
-        case .rejected:
-            return rejectedRecords.count
-        }
+        StreetRecordStatusList(status: status, records: records)
     }
 }
 

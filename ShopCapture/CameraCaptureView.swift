@@ -290,7 +290,7 @@ struct CameraCaptureView: View {
     }
 
     private var landscapeSideActionButtons: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 18) {
             if processor.isRecognizing {
                 Button {
                     toggleRecognition()
