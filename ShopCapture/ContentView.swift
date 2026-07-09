@@ -95,9 +95,9 @@ private struct LaunchCheckingView: View {
 
 private struct AppLoginView: View {
     @EnvironmentObject private var authSession: AuthSession
-    @State private var username = ""
-    @State private var password = ""
-    @State private var siteID = "1"
+    @State private var username = "demo"
+    @State private var password = "123456"
+    @State private var siteID = "999"
     @State private var message: String?
     @State private var isWorking = false
 

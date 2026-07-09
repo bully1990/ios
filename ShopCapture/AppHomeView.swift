@@ -753,9 +753,6 @@ private struct MessageCenterView: View {
 
 private struct ProfileCenterView: View {
     @EnvironmentObject private var authSession: AuthSession
-    @State private var alipayAccount = ""
-    @State private var alipayName = ""
-    @State private var withdrawCoins = ""
     @State private var statusMessage: String?
     @State private var isWorking = false
 
@@ -769,8 +766,6 @@ private struct ProfileCenterView: View {
                         header
                         if let account = authSession.account {
                             accountCard(account)
-                            alipayCard
-                            withdrawCard(account)
                             logoutButton
                         }
 
@@ -793,19 +788,11 @@ private struct ProfileCenterView: View {
             .task {
                 await refreshAccount()
             }
-            .onChange(of: authSession.account?.alipayAccount) { _, newValue in
-                alipayAccount = newValue ?? ""
-            }
-            .onChange(of: authSession.account?.alipayName) { _, newValue in
-                alipayName = newValue ?? ""
-            }
         }
     }
 
     private func refreshAccount() async {
         await authSession.refreshAccount()
-        alipayAccount = authSession.account?.alipayAccount ?? ""
-        alipayName = authSession.account?.alipayName ?? ""
         statusMessage = nil
     }
 
@@ -819,13 +806,18 @@ private struct ProfileCenterView: View {
 
             Spacer()
 
-            Image(systemName: "person.crop.circle.fill.badge.checkmark")
-                .font(.system(size: 34, weight: .bold))
-                .foregroundStyle(DesignTokens.ink)
-                .frame(width: 52, height: 52)
-                .background(.white)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(DesignTokens.line, lineWidth: 1))
+            NavigationLink {
+                ProfileSettingsView()
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(DesignTokens.ink)
+                    .frame(width: 52, height: 52)
+                    .background(.white)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(DesignTokens.line, lineWidth: 1))
+            }
+            .accessibilityLabel("设置")
         }
     }
 
@@ -841,6 +833,18 @@ private struct ProfileCenterView: View {
                     .foregroundStyle(DesignTokens.secondaryText)
 
                 Spacer()
+
+                NavigationLink {
+                    WithdrawView()
+                } label: {
+                    Text("提现")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
+                        .background(DesignTokens.emerald)
+                        .clipShape(Capsule())
+                }
             }
 
             Divider()
@@ -854,6 +858,73 @@ private struct ProfileCenterView: View {
             ProfileInfoRow(title: "状态", value: account.profile.syncStatus, symbol: "checkmark.circle.fill")
         }
         .profilePanelStyle()
+    }
+
+    private var logoutButton: some View {
+        Button(role: .destructive) {
+            Task {
+                await logout()
+            }
+        } label: {
+            Text("退出登录")
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .background(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .disabled(isWorking)
+    }
+
+    private func logout() async {
+        isWorking = true
+        defer { isWorking = false }
+
+        await authSession.logout()
+        statusMessage = nil
+    }
+}
+
+private struct ProfileSettingsView: View {
+    @EnvironmentObject private var authSession: AuthSession
+    @State private var alipayAccount = ""
+    @State private var alipayName = ""
+    @State private var statusMessage: String?
+    @State private var isWorking = false
+
+    var body: some View {
+        ZStack {
+            DesignTokens.background.ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("设置")
+                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .foregroundStyle(DesignTokens.ink)
+
+                    alipayCard
+
+                    if let statusMessage {
+                        Text(statusMessage)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(DesignTokens.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(.white.opacity(0.72))
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 28)
+            }
+        }
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            alipayAccount = authSession.account?.alipayAccount ?? ""
+            alipayName = authSession.account?.alipayName ?? ""
+        }
     }
 
     private var alipayCard: some View {
@@ -888,50 +959,6 @@ private struct ProfileCenterView: View {
         .profilePanelStyle()
     }
 
-    private func withdrawCard(_ account: UserAccountSummary) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("金币提现")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(DesignTokens.ink)
-
-            TextField("提现金币数量", text: $withdrawCoins)
-                .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
-
-            Button {
-                Task {
-                    await submitWithdraw()
-                }
-            } label: {
-                Text(isWorking ? "提交中..." : "提交提现申请")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 13)
-                    .background(canSubmitWithdraw(availableCoins: account.coins) ? DesignTokens.emerald : Color.gray.opacity(0.55))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-            .disabled(isWorking || !canSubmitWithdraw(availableCoins: account.coins))
-        }
-        .profilePanelStyle()
-    }
-
-    private var logoutButton: some View {
-        Button(role: .destructive) {
-            Task {
-                await logout()
-            }
-        } label: {
-            Text("退出登录")
-                .font(.headline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
-                .background(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .disabled(isWorking)
-    }
-
     private func saveAlipay() async {
         isWorking = true
         defer { isWorking = false }
@@ -949,8 +976,101 @@ private struct ProfileCenterView: View {
             statusMessage = "支付宝保存失败"
         }
     }
+}
 
-    private func submitWithdraw() async {
+private struct WithdrawView: View {
+    @EnvironmentObject private var authSession: AuthSession
+    @State private var withdrawCoins = ""
+    @State private var statusMessage: String?
+    @State private var isWorking = false
+
+    var body: some View {
+        ZStack {
+            DesignTokens.background.ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("金币提现")
+                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .foregroundStyle(DesignTokens.ink)
+
+                    if let account = authSession.account {
+                        withdrawCard(account)
+                    }
+
+                    if let statusMessage {
+                        Text(statusMessage)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(DesignTokens.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(.white.opacity(0.72))
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 28)
+            }
+        }
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func withdrawCard(_ account: UserAccountSummary) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .lastTextBaseline) {
+                Text("\(account.coins)")
+                    .font(.system(size: 36, weight: .black, design: .rounded))
+                    .foregroundStyle(DesignTokens.ink)
+                Text("可提现金币")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(DesignTokens.secondaryText)
+            }
+
+            ProfileInfoRow(
+                title: "收款支付宝",
+                value: account.alipayAccount.isEmpty ? "请先到设置中配置" : account.alipayAccount,
+                symbol: "creditcard.fill"
+            )
+
+            if account.alipayAccount.isEmpty || account.alipayName.isEmpty {
+                NavigationLink {
+                    ProfileSettingsView()
+                } label: {
+                    Text("去配置收款支付宝")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(DesignTokens.emerald)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(DesignTokens.softEmerald)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
+
+            TextField("提现金币数量", text: $withdrawCoins)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+
+            Button {
+                Task {
+                    await submitWithdraw(account: account)
+                }
+            } label: {
+                Text(isWorking ? "提交中..." : "提交提现申请")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(canSubmitWithdraw(account: account) ? DesignTokens.emerald : Color.gray.opacity(0.55))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .disabled(isWorking || !canSubmitWithdraw(account: account))
+        }
+        .profilePanelStyle()
+    }
+
+    private func submitWithdraw(account: UserAccountSummary) async {
         guard let coins = Int(withdrawCoins) else {
             statusMessage = "请输入正确的金币数量"
             return
@@ -962,34 +1082,24 @@ private struct ProfileCenterView: View {
         do {
             try await UserAPIClient.submitWithdraw(
                 coins: coins,
-                alipayAccount: alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines),
-                alipayName: alipayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                alipayAccount: account.alipayAccount,
+                alipayName: account.alipayName
             )
             withdrawCoins = ""
             statusMessage = "提现申请已提交"
-            await refreshAccount()
+            await authSession.refreshAccount()
         } catch {
             statusMessage = "提现申请提交失败"
         }
     }
 
-    private func logout() async {
-        isWorking = true
-        defer { isWorking = false }
-
-        await authSession.logout()
-        withdrawCoins = ""
-        alipayAccount = ""
-        alipayName = ""
-        statusMessage = nil
-    }
-
-    private func canSubmitWithdraw(availableCoins: Int) -> Bool {
-        guard let coins = Int(withdrawCoins), coins > 0, coins <= availableCoins else {
+    private func canSubmitWithdraw(account: UserAccountSummary) -> Bool {
+        guard let coins = Int(withdrawCoins), coins > 0, coins <= account.coins else {
             return false
         }
-        return !alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !alipayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        return !account.alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !account.alipayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
