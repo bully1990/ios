@@ -20,6 +20,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private enum Constants {
         static let frameProcessingInterval = 2
         static let requiredStableDetections = 1
+        static let automaticCaptureDelay: TimeInterval = 3
         static let maximumZoomFactor: CGFloat = 6
     }
 
@@ -59,6 +60,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var state: CaptureState = .idle
     private var stablePhoneNumber: String?
     private var stableCount = 0
+    private var pendingAutomaticPhoneNumberKey: String?
+    private var pendingAutomaticCaptureDeadline: Date?
     private var lastCaptureTime = Date.distantPast
     private var currentImageOrientation: CGImagePropertyOrientation = .up
     private var currentVideoRotationAngle: CGFloat = 90
@@ -234,8 +237,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
     func markSaveCompleted() {
         state = .cooldown
-        stablePhoneNumber = nil
-        stableCount = 0
+        resetStability()
 
         Task { @MainActor in
             message = "已保存"
@@ -250,8 +252,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     func markSaveFailed(_ error: Error) {
         print("Warning: failed to save record: \(error.localizedDescription)")
         state = .idle
-        stablePhoneNumber = nil
-        stableCount = 0
+        resetStability()
         message = "保存失败"
     }
 
@@ -481,11 +482,31 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             } else {
                 stablePhoneNumber = phoneNumber
                 stableCount = 1
+                pendingAutomaticPhoneNumberKey = nil
+                pendingAutomaticCaptureDeadline = nil
             }
 
             guard stableCount >= Constants.requiredStableDetections else {
                 Task { @MainActor in
                     message = "识别中 \(stableCount)/\(Constants.requiredStableDetections)"
+                }
+                return
+            }
+
+            let now = Date()
+            if pendingAutomaticPhoneNumberKey != phoneNumberKey {
+                pendingAutomaticPhoneNumberKey = phoneNumberKey
+                pendingAutomaticCaptureDeadline = now.addingTimeInterval(Constants.automaticCaptureDelay)
+                Task { @MainActor in
+                    message = "已识别到电话，请保持画面 3 秒"
+                }
+                return
+            }
+
+            if let deadline = pendingAutomaticCaptureDeadline, now < deadline {
+                let remaining = max(1, Int(ceil(deadline.timeIntervalSince(now))))
+                Task { @MainActor in
+                    message = "请保持画面 \(remaining) 秒"
                 }
                 return
             }
@@ -515,6 +536,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private func resetStability() {
         stablePhoneNumber = nil
         stableCount = 0
+        pendingAutomaticPhoneNumberKey = nil
+        pendingAutomaticCaptureDeadline = nil
     }
 
     private func canonicalPhoneNumberKey(from phoneNumbers: [String]) -> String {

@@ -21,26 +21,36 @@ enum ShopRecordStore {
         }
         let imageURL = try writeImage(payload.image, id: id)
         let context = persistence.newBackgroundContext()
+        var clientID = id
+        var replacedImagePath: String?
 
         try await context.perform {
-            let record = NSEntityDescription.insertNewObject(forEntityName: "ShopRecord", into: context)
-            record.setValue(id, forKey: "id")
-            record.setValue(payload.fullText, forKey: "fullText")
-            record.setValue(payload.phoneNumber, forKey: "phoneNumber")
-            record.setValue(payload.shopName, forKey: "shopName")
-            record.setValue(payload.serviceContent, forKey: "serviceContent")
-            record.setValue(imageURL.path, forKey: "imagePath")
-            record.setValue(payload.latitude, forKey: "latitude")
-            record.setValue(payload.longitude, forKey: "longitude")
-            record.setValue(payload.timestamp, forKey: "timestamp")
+            let record = try findDuplicateRecord(for: payload, context: context)
+                ?? NSEntityDescription.insertNewObject(forEntityName: "ShopRecord", into: context)
+            let isExistingRecord = record.value(forKey: "id") != nil
+
+            if isExistingRecord {
+                if let existingID = record.value(forKey: "id") as? UUID {
+                    clientID = existingID
+                }
+                replacedImagePath = record.value(forKey: "imagePath") as? String
+            } else {
+                record.setValue(id, forKey: "id")
+            }
+
+            apply(payload, imagePath: imageURL.path, to: record)
 
             if context.hasChanges {
                 try context.save()
             }
         }
 
+        if let replacedImagePath, replacedImagePath != imageURL.path {
+            try? deleteImage(at: replacedImagePath)
+        }
+
         let uploadPayload = ShopCaptureUploadRequest(
-            clientID: id,
+            clientID: clientID,
             imageData: uploadImageData,
             fullText: payload.fullText,
             phoneNumber: payload.phoneNumber,
@@ -58,6 +68,59 @@ enum ShopRecordStore {
                 print("Warning: failed to upload shop record: \(error.localizedDescription)")
             }
         }
+    }
+
+    private static func apply(_ payload: CapturedShopPayload, imagePath: String, to record: NSManagedObject) {
+        record.setValue(payload.fullText, forKey: "fullText")
+        record.setValue(payload.phoneNumber, forKey: "phoneNumber")
+        record.setValue(cleaned(payload.shopName), forKey: "shopName")
+        record.setValue(cleaned(payload.serviceContent), forKey: "serviceContent")
+        record.setValue(imagePath, forKey: "imagePath")
+        record.setValue(payload.latitude, forKey: "latitude")
+        record.setValue(payload.longitude, forKey: "longitude")
+        record.setValue(payload.timestamp, forKey: "timestamp")
+    }
+
+    private static func findDuplicateRecord(for payload: CapturedShopPayload, context: NSManagedObjectContext) throws -> NSManagedObject? {
+        let request = NSFetchRequest<NSManagedObject>(entityName: "ShopRecord")
+        request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
+        request.fetchLimit = 100
+
+        let phoneKey = canonicalPhoneKey(payload.phoneNumber)
+        let nameKey = canonicalNameKey(payload.shopName)
+        guard phoneKey != nil || nameKey != nil else {
+            return nil
+        }
+
+        return try context.fetch(request).first { record in
+            if let phoneKey,
+               canonicalPhoneKey(record.value(forKey: "phoneNumber") as? String) == phoneKey {
+                return true
+            }
+
+            if let nameKey,
+               canonicalNameKey(record.value(forKey: "shopName") as? String) == nameKey {
+                return true
+            }
+
+            return false
+        }
+    }
+
+    private static func canonicalPhoneKey(_ value: String?) -> String? {
+        let numbers = PhoneNumberExtractor.allPhoneNumbers(in: value ?? "")
+        guard !numbers.isEmpty else {
+            return nil
+        }
+        return numbers.map { $0.filter(\.isNumber) }.sorted().joined(separator: "|")
+    }
+
+    private static func canonicalNameKey(_ value: String?) -> String? {
+        let normalized = cleaned(value)?
+            .applyingTransform(.fullwidthToHalfwidth, reverse: false)?
+            .lowercased()
+            .filter { !$0.isWhitespace && !$0.isPunctuation }
+        return normalized?.isEmpty == false ? normalized : nil
     }
 
     @MainActor
