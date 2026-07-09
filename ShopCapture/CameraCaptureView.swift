@@ -503,20 +503,9 @@ struct CameraCaptureView: View {
     }
 
     private func importPhoto(_ image: UIImage) async {
-        do {
-            processor.setMessage("正在识别相册图片")
-
-            guard let frame = try await ImageTextRecognizer.detectShopFrame(in: image) else {
-                processor.setMessage("未识别到电话号码")
-                return
-            }
-
-            processor.setMessage("正在保存")
-            CaptureCoordinator.shared.save(frame: frame, processor: processor)
-        } catch {
-            print("Warning: failed to import photo: \(error.localizedDescription)")
-            processor.setMessage("相册识别失败")
-        }
+        processor.setMessage("正在用 AI 识别相册图片")
+        let frame = DetectedShopFrame(image: image, fullText: "", phoneNumber: "")
+        CaptureCoordinator.shared.save(frame: frame, processor: processor)
     }
 }
 
@@ -559,22 +548,23 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
             let location = await locationProvider?.currentLocation(timeout: 3)
             let clientID = UUID()
             let timestamp = Date()
-            let remoteImageURL = await uploadImageForVision(
-                frame: frame,
-                clientID: clientID,
-                location: location,
-                timestamp: timestamp,
-                processor: processor
-            )
-            let summary = await summarize(frame: frame, remoteImageURL: remoteImageURL, processor: processor)
+            guard let summary = await summarize(frame: frame, processor: processor),
+                  let phoneNumber = summary.phoneNumber,
+                  !PhoneNumberExtractor.allPhoneNumbers(in: phoneNumber).isEmpty else {
+                isSaving = false
+                processor.markSaveFailed(URLError(.cannotParseResponse))
+                processor.setMessage("未识别到电话号码")
+                return
+            }
+
             processor.setMessage("正在保存")
             let payload = CapturedShopPayload(
                 clientID: clientID,
                 image: frame.image,
                 fullText: frame.fullText,
-                phoneNumber: frame.phoneNumber,
-                shopName: summary?.shopName,
-                serviceContent: summary?.serviceContent,
+                phoneNumber: phoneNumber,
+                shopName: summary.shopName,
+                serviceContent: summary.serviceContent,
                 latitude: location?.coordinate.latitude ?? 0.0,
                 longitude: location?.coordinate.longitude ?? 0.0,
                 timestamp: timestamp
@@ -591,62 +581,19 @@ final class CaptureCoordinator: CameraFrameProcessorDelegate {
         }
     }
 
-    private func uploadImageForVision(
-        frame: DetectedShopFrame,
-        clientID: UUID,
-        location: CLLocation?,
-        timestamp: Date,
-        processor: CameraFrameProcessor
-    ) async -> String? {
-        processor.setMessage("正在上传图片")
+    private func summarize(frame: DetectedShopFrame, processor: CameraFrameProcessor) async -> ShopTextSummary? {
+        processor.setMessage("正在用 AI 识别")
 
         guard let imageData = frame.image.jpegData(compressionQuality: 0.78) else {
             return nil
         }
 
-        let uploadPayload = ShopCaptureUploadRequest(
-            clientID: clientID,
-            imageData: imageData,
-            fullText: frame.fullText,
-            phoneNumber: frame.phoneNumber,
-            shopName: nil,
-            serviceContent: nil,
-            latitude: location?.coordinate.latitude ?? 0.0,
-            longitude: location?.coordinate.longitude ?? 0.0,
-            timestamp: timestamp
-        )
-
         do {
-            let response = try await ShopCaptureAPIClient.upload(uploadPayload)
-            return response.imageURL
+            return try await QwenVisionClient.summarize(imageData: imageData, phoneNumber: frame.phoneNumber)
         } catch {
-            print("Warning: failed to upload image for Qwen vision: \(error.localizedDescription)")
+            print("Warning: Qwen vision summary failed: \(error.localizedDescription)")
             return nil
         }
-    }
-
-    private func summarize(frame: DetectedShopFrame, remoteImageURL: String?, processor: CameraFrameProcessor) async -> ShopTextSummary? {
-        processor.setMessage("正在整理名称和服务")
-
-        if let remoteImageURL {
-            do {
-                if let summary = try await QwenVisionClient.summarize(imageURL: remoteImageURL, phoneNumber: frame.phoneNumber) {
-                    return summary
-                }
-            } catch {
-                print("Warning: Qwen vision summary failed: \(error.localizedDescription)")
-            }
-        }
-
-        do {
-            if let summary = try await DeepSeekClient.summarize(fullText: frame.fullText, phoneNumber: frame.phoneNumber) {
-                return summary
-            }
-        } catch {
-            print("Warning: DeepSeek summary failed: \(error.localizedDescription)")
-        }
-
-        return ShopTextSummarizer.summarizeLocally(fullText: frame.fullText, phoneNumber: frame.phoneNumber)
     }
 
     func cameraFrameProcessor(_ processor: CameraFrameProcessor, didChangeMessage message: String?) {

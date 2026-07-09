@@ -3,9 +3,16 @@ import Foundation
 struct ShopTextSummary {
     let shopName: String?
     let serviceContent: String?
+    let phoneNumber: String?
 
     var hasUsefulContent: Bool {
         shopName?.isEmpty == false || serviceContent?.isEmpty == false
+    }
+
+    init(shopName: String?, serviceContent: String?, phoneNumber: String? = nil) {
+        self.shopName = shopName
+        self.serviceContent = serviceContent
+        self.phoneNumber = phoneNumber
     }
 }
 
@@ -36,7 +43,7 @@ enum ShopTextSummarizer {
 
         let serviceContent = formattedServiceContent(summary.serviceContent)
         let shopName = summary.shopName ?? fallbackName(from: serviceContent)
-        let result = ShopTextSummary(shopName: shopName, serviceContent: serviceContent)
+        let result = ShopTextSummary(shopName: shopName, serviceContent: serviceContent, phoneNumber: summary.phoneNumber)
 
         return result.hasUsefulContent ? result : nil
     }

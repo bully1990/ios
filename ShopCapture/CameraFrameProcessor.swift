@@ -400,6 +400,17 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             return
         }
 
+        if mode == .manual {
+            isVisionBusy = false
+            let detectedFrame = DetectedShopFrame(image: croppedImage, fullText: "", phoneNumber: "")
+
+            Task { @MainActor in
+                message = "已拍照，正在用 AI 识别"
+                delegate?.cameraFrameProcessor(self, didDetect: detectedFrame)
+            }
+            return
+        }
+
         let request = VNRecognizeTextRequest { [weak self] request, error in
             guard let self else { return }
             defer { self.isVisionBusy = false }
