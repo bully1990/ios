@@ -3,6 +3,7 @@ import Foundation
 import UIKit
 
 struct CapturedShopPayload {
+    let clientID: UUID?
     let image: UIImage
     let fullText: String
     let phoneNumber: String
@@ -15,7 +16,7 @@ struct CapturedShopPayload {
 
 enum ShopRecordStore {
     static func save(_ payload: CapturedShopPayload, persistence: PersistenceController = .shared) async throws {
-        let id = UUID()
+        let id = payload.clientID ?? UUID()
         guard let uploadImageData = payload.image.jpegData(compressionQuality: 0.78) else {
             throw CocoaError(.fileReadCorruptFile)
         }

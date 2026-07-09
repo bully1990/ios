@@ -31,6 +31,7 @@
 		0A00004E2C31000100000000 /* ShopCaptureAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A00004D2C31000100000000 /* ShopCaptureAPIClient.swift */; };
 		0A0000502C31000100000000 /* UserAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A00004F2C31000100000000 /* UserAPIClient.swift */; };
 		0A0000522C31000100000000 /* ShopFeedAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000512C31000100000000 /* ShopFeedAPIClient.swift */; };
+		0A0000542C31000100000000 /* QwenVisionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000532C31000100000000 /* QwenVisionClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -71,6 +72,7 @@
 		0A00004D2C31000100000000 /* ShopCaptureAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShopCaptureAPIClient.swift; sourceTree = "<group>"; };
 		0A00004F2C31000100000000 /* UserAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserAPIClient.swift; sourceTree = "<group>"; };
 		0A0000512C31000100000000 /* ShopFeedAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShopFeedAPIClient.swift; sourceTree = "<group>"; };
+		0A0000532C31000100000000 /* QwenVisionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenVisionClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -121,6 +123,7 @@
 				0A0000412C31000100000000 /* ImageTextRecognizer.swift */,
 				0A0000432C31000100000000 /* PhotoLibraryPicker.swift */,
 				0A0000452C31000100000000 /* DeepSeekClient.swift */,
+				0A0000532C31000100000000 /* QwenVisionClient.swift */,
 				0A0000472C31000100000000 /* OCRTextContextBuilder.swift */,
 				0A0000492C31000100000000 /* CaptureGuide.swift */,
 				0A00001C2C31000100000000 /* PhoneNumberExtractor.swift */,
@@ -265,6 +268,7 @@
 				0A0000442C31000100000000 /* ImageTextRecognizer.swift in Sources */,
 				0A0000422C31000100000000 /* PhotoLibraryPicker.swift in Sources */,
 				0A0000462C31000100000000 /* DeepSeekClient.swift in Sources */,
+				0A0000542C31000100000000 /* QwenVisionClient.swift in Sources */,
 				0A0000482C31000100000000 /* OCRTextContextBuilder.swift in Sources */,
 				0A00004A2C31000100000000 /* CaptureGuide.swift in Sources */,
 				0A00000C2C31000100000000 /* PhoneNumberExtractor.swift in Sources */,

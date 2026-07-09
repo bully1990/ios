@@ -28,6 +28,7 @@ jobs:
       - name: Build unsigned device app
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p build
@@ -43,6 +44,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+            DASHSCOPE_API_KEY="$DASHSCOPE_API_KEY" \
             clean build 2>&1 | tee build/xcodebuild.log
           status=${PIPESTATUS[0]}
           set -e
