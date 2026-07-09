@@ -8,19 +8,9 @@ struct AppHomeView: View {
                     Label("首页", systemImage: "house.fill")
                 }
 
-            NearbyDiscoveryView()
-                .tabItem {
-                    Label("发现/附近", systemImage: "location.fill")
-                }
-
             StreetVerifyTaskView()
                 .tabItem {
                     Label("扫街", systemImage: "camera.fill")
-                }
-
-            MessageCenterView()
-                .tabItem {
-                    Label("消息", systemImage: "message.fill")
                 }
 
             ProfileCenterView()
@@ -42,6 +32,7 @@ private struct ServiceHomeView: View {
     @State private var coverage = "98.6"
     @State private var trustScore = "98.6"
     @State private var searchText = ""
+    @State private var hasLoadedHome = false
 
     var body: some View {
         NavigationStack {
@@ -60,9 +51,14 @@ private struct ServiceHomeView: View {
                     .padding(.top, 18)
                     .padding(.bottom, 28)
                 }
+                .refreshable {
+                    await loadHome(keyword: searchText)
+                }
             }
             .navigationBarHidden(true)
             .task {
+                guard !hasLoadedHome else { return }
+                hasLoadedHome = true
                 await loadHome()
             }
         }
@@ -293,13 +289,11 @@ private struct ServiceShortcut: View {
     let title: String
 
     private var symbol: String {
-        switch title {
-        case "手机维修": return "iphone.gen3"
-        case "打印复印": return "printer.fill"
-        case "家电清洗": return "washer.fill"
-        case "门锁维修": return "lock.fill"
-        default: return "scooter"
-        }
+        if title.contains("手机") || title.contains("维修") { return "iphone.gen3" }
+        if title.contains("打印") || title.contains("复印") { return "printer.fill" }
+        if title.contains("清洗") || title.contains("家电") { return "washer.fill" }
+        if title.contains("锁") { return "lock.fill" }
+        return "storefront.fill"
     }
 
     var body: some View {
@@ -654,22 +648,28 @@ private struct StreetVerifyTaskView: View {
                             .font(.largeTitle.weight(.black))
                             .foregroundStyle(DesignTokens.ink)
 
-                        Button {
-                            isShowingCapture = true
-                        } label: {
-                            Label("开始扫街录入", systemImage: "camera.fill")
-                                .font(.headline.weight(.bold))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(DesignTokens.emerald)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        }
-
-                        StreetRecordList(records: Array(records.prefix(8)))
+                        StreetRecordList(pendingRecords: Array(records), approvedRecords: [], rejectedRecords: [])
                     }
                     .padding(18)
+                    .padding(.bottom, 78)
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    isShowingCapture = true
+                } label: {
+                    Label("开始扫街录入", systemImage: "camera.fill")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(DesignTokens.emerald)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
+                .background(.regularMaterial)
             }
             .fullScreenCover(isPresented: $isShowingCapture) {
                 ZStack(alignment: .topTrailing) {
@@ -988,7 +988,13 @@ private struct StaticFeaturePage: View {
 }
 
 private struct StreetRecordList: View {
-    let records: [ShopRecord]
+    let pendingRecords: [ShopRecord]
+    let approvedRecords: [ShopRecord]
+    let rejectedRecords: [ShopRecord]
+
+    private var totalCount: Int {
+        pendingRecords.count + approvedRecords.count + rejectedRecords.count
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -999,12 +1005,12 @@ private struct StreetRecordList: View {
 
                 Spacer()
 
-                Text("\(records.count) 条")
+                Text("\(totalCount) 条")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(DesignTokens.secondaryText)
             }
 
-            if records.isEmpty {
+            if totalCount == 0 {
                 ContentUnavailableView(
                     "暂无扫街记录",
                     systemImage: "text.viewfinder",
@@ -1015,12 +1021,52 @@ private struct StreetRecordList: View {
                 .background(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             } else {
+                StreetRecordSection(title: "待审核", records: pendingRecords, color: .orange)
+                StreetRecordSection(title: "已通过", records: approvedRecords, color: DesignTokens.emerald)
+                StreetRecordSection(title: "未通过", records: rejectedRecords, color: .red)
+            }
+        }
+    }
+}
+
+private struct StreetRecordSection: View {
+    let title: String
+    let records: [ShopRecord]
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(color)
+
+                Text("\(records.count)")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(color.opacity(0.12))
+                    .clipShape(Capsule())
+
+                Spacer()
+            }
+
+            if records.isEmpty {
+                Text("暂无\(title)记录")
+                    .font(.caption)
+                    .foregroundStyle(DesignTokens.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(.white.opacity(0.72))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else {
                 VStack(spacing: 12) {
                     ForEach(records) { record in
                         NavigationLink {
                             RecordDetailView(record: record)
                         } label: {
-                            StreetRecordCard(record: record)
+                            StreetRecordCard(record: record, statusTitle: title, statusColor: color)
                         }
                         .buttonStyle(.plain)
                     }
@@ -1032,6 +1078,8 @@ private struct StreetRecordList: View {
 
 private struct StreetRecordCard: View {
     @ObservedObject var record: ShopRecord
+    let statusTitle: String
+    let statusColor: Color
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1046,12 +1094,12 @@ private struct StreetRecordCard: View {
 
                     Spacer()
 
-                    Text("待审核")
+                    Text(statusTitle)
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(statusColor)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
-                        .background(Color.orange.opacity(0.12))
+                        .background(statusColor.opacity(0.12))
                         .clipShape(Capsule())
                 }
 

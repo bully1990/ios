@@ -6,14 +6,15 @@ enum ShopFeedAPIClient {
 
     static func fetchHome(latitude: Double?, longitude: Double?, keyword: String = "") async throws -> ShopHomeFeed {
         let records = try await fetchRecords()
-        let shops = makeFeedShops(records: filtered(records, keyword: keyword), latitude: latitude, longitude: longitude, limit: 8)
+        let approvedRecords = filtered(records, keyword: keyword).filter { $0.isApproved }
+        let shops = makeFeedShops(records: approvedRecords, latitude: latitude, longitude: longitude, limit: 8)
         return ShopHomeFeed(
             city: locationTitle(latitude: latitude, longitude: longitude),
             district: districtTitle(latitude: latitude, longitude: longitude),
             coverage: coverageScore(records.count),
             trustScore: averageTrustScore(shops),
-            services: serviceLabels(from: records),
-            hotServices: hotServices(from: records),
+            services: serviceLabels(from: approvedRecords),
+            hotServices: hotServices(from: approvedRecords),
             shops: shops
         )
     }
@@ -91,10 +92,7 @@ enum ShopFeedAPIClient {
                 FeedShop(record: record, latitude: latitude, longitude: longitude)
             }
             .sorted { lhs, rhs in
-                if lhs.distanceMeters == rhs.distanceMeters {
-                    return lhs.id > rhs.id
-                }
-                return lhs.distanceMeters < rhs.distanceMeters
+                lhs.id > rhs.id
             }
             .prefix(limit)
             .enumerated()
@@ -105,16 +103,15 @@ enum ShopFeedAPIClient {
 
     private static func serviceLabels(from records: [ShopCaptureRecord]) -> [String] {
         let detected = records.map { primaryService(text: $0.serviceContent.value.isEmpty ? $0.fullText.value : $0.serviceContent.value) }
-        let merged = detected + ["手机维修", "家电清洗", "门锁维修", "餐饮外卖"]
-        return unique(merged).prefix(5).map { $0 }
+        return unique(detected).prefix(5).map { $0 }
     }
 
     private static func hotServices(from records: [ShopCaptureRecord]) -> [String] {
-        Array((serviceLabels(from: records) + ["打印复印", "电脑维修", "外卖订餐"]).prefix(8))
+        Array(serviceLabels(from: records).prefix(8))
     }
 
     private static func nearbyFilters(from records: [ShopCaptureRecord]) -> [String] {
-        Array((["全部"] + serviceLabels(from: records) + ["24小时"]).prefix(6))
+        Array((["全部"] + serviceLabels(from: records)).prefix(6))
     }
 
     private static func unique(_ values: [String]) -> [String] {
@@ -468,6 +465,11 @@ private struct ShopCaptureRecord: Decodable, Sendable {
         case latitude
         case longitude
         case auditStatus = "audit_status"
+    }
+
+    var isApproved: Bool {
+        let status = auditStatus.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return status == "1" || status == "approved" || status == "pass" || status == "passed" || status == "已通过"
     }
 }
 
