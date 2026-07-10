@@ -19,10 +19,23 @@ enum ShopFeedAPIClient {
         )
     }
 
-    static func fetchAllShops(latitude: Double?, longitude: Double?, keyword: String = "") async throws -> [FeedShop] {
-        let records = try await fetchRecords()
+    static func fetchAllShops(
+        latitude: Double?,
+        longitude: Double?,
+        keyword: String = "",
+        page: Int,
+        pageSize: Int
+    ) async throws -> PagedResult<FeedShop> {
+        let records = try await fetchRecords(page: page, pageSize: pageSize)
         let approvedRecords = filtered(records, keyword: keyword).filter { $0.isApproved }
-        return makeFeedShops(records: approvedRecords, latitude: latitude, longitude: longitude, limit: 100)
+        let shops = makeFeedShops(
+            records: approvedRecords,
+            latitude: latitude,
+            longitude: longitude,
+            limit: pageSize,
+            rankOffset: (page - 1) * pageSize
+        )
+        return PagedResult(items: shops, page: page, hasMore: records.count == pageSize)
     }
 
     static func fetchNearby(latitude: Double?, longitude: Double?, keyword: String = "", service: String = "全部") async throws -> ShopNearbyFeed {
@@ -52,8 +65,9 @@ enum ShopFeedAPIClient {
         return makeFeedShops(records: records, latitude: latitude, longitude: longitude, limit: 30)
     }
 
-    static func fetchStreetRecords() async throws -> [StreetReviewRecord] {
-        try await fetchRecords()
+    static func fetchStreetRecords(page: Int, pageSize: Int) async throws -> PagedResult<StreetReviewRecord> {
+        let records = try await fetchRecords(page: page, pageSize: pageSize)
+        let items = records
             .map(\.streetReviewRecord)
             .sorted { lhs, rhs in
                 if lhs.capturedAt != rhs.capturedAt {
@@ -61,19 +75,11 @@ enum ShopFeedAPIClient {
                 }
                 return (Int(lhs.id) ?? 0) > (Int(rhs.id) ?? 0)
             }
+        return PagedResult(items: items, page: page, hasMore: records.count == pageSize)
     }
 
-    private static func fetchRecords() async throws -> [ShopCaptureRecord] {
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
-        components.queryItems = [
-            URLQueryItem(name: "m", value: "content"),
-            URLQueryItem(name: "c", value: "shop_capture"),
-            URLQueryItem(name: "a", value: "ajax_list_records"),
-            URLQueryItem(name: "page", value: "1"),
-            URLQueryItem(name: "pagesize", value: "100")
-        ]
-
-        var request = URLRequest(url: components.url!)
+    private static func fetchRecords(page: Int = 1, pageSize: Int = 100) async throws -> [ShopCaptureRecord] {
+        var request = URLRequest(url: recordsURL(page: page, pageSize: pageSize))
         request.httpMethod = "GET"
         request.timeoutInterval = 20
         request.httpShouldHandleCookies = true
@@ -92,6 +98,18 @@ enum ShopFeedAPIClient {
         return envelope.data
     }
 
+    static func recordsURL(page: Int, pageSize: Int) -> URL {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "m", value: "content"),
+            URLQueryItem(name: "c", value: "shop_capture"),
+            URLQueryItem(name: "a", value: "ajax_list_records"),
+            URLQueryItem(name: "page", value: "\(max(1, page))"),
+            URLQueryItem(name: "pagesize", value: "\(max(1, pageSize))")
+        ]
+        return components.url!
+    }
+
     private static func filtered(_ records: [ShopCaptureRecord], keyword: String) -> [ShopCaptureRecord] {
         let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -104,18 +122,27 @@ enum ShopFeedAPIClient {
         }
     }
 
-    private static func makeFeedShops(records: [ShopCaptureRecord], latitude: Double?, longitude: Double?, limit: Int) -> [FeedShop] {
+    private static func makeFeedShops(
+        records: [ShopCaptureRecord],
+        latitude: Double?,
+        longitude: Double?,
+        limit: Int,
+        rankOffset: Int = 0
+    ) -> [FeedShop] {
         records
             .map { record in
                 FeedShop(record: record, latitude: latitude, longitude: longitude)
             }
             .sorted { lhs, rhs in
-                lhs.id > rhs.id
+                if latitude != nil, longitude != nil, lhs.distanceMeters != rhs.distanceMeters {
+                    return lhs.distanceMeters < rhs.distanceMeters
+                }
+                return lhs.id > rhs.id
             }
             .prefix(limit)
             .enumerated()
             .map { index, shop in
-                shop.withRank(index + 1)
+                shop.withRank(rankOffset + index + 1)
             }
     }
 
@@ -196,6 +223,12 @@ struct ShopHomeFeed: Sendable {
         case hotServices = "hot_services"
         case shops
     }
+}
+
+struct PagedResult<Item: Sendable>: Sendable {
+    let items: [Item]
+    let page: Int
+    let hasMore: Bool
 }
 
 struct ShopNearbyFeed: Sendable {
@@ -453,7 +486,7 @@ struct FeedCoordinate: Sendable {
     let y: Double
 }
 
-enum StreetReviewState: String, Sendable {
+enum StreetReviewState: String, CaseIterable, Sendable {
     case pending
     case approved
     case rejected

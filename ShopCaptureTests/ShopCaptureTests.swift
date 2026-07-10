@@ -130,4 +130,25 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(summary?.shopName, "主招牌")
     }
 
+    func testRecordListURLUsesRequestedPageAndPageSize() throws {
+        let url = ShopFeedAPIClient.recordsURL(page: 3, pageSize: 20)
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+
+        XCTAssertEqual(query["page"], "3")
+        XCTAssertEqual(query["pagesize"], "20")
+    }
+
+    func testStreetReviewStatesContainOnlyVisibleSegments() {
+        XCTAssertEqual(StreetReviewState.allCases, [.pending, .approved, .rejected])
+        XCTAssertEqual(StreetReviewState.allCases.map(\.title), ["待审核", "已通过", "未通过"])
+    }
+
+    func testCityOptionBuildsPinyinInitial() {
+        let city = CityOption(name: "石家庄", latitude: 38.04, longitude: 114.51)
+
+        XCTAssertEqual(city.initial, "S")
+        XCTAssertTrue(city.pinyin.contains("SHI"))
+    }
+
 }

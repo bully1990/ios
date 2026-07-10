@@ -152,6 +152,10 @@ private struct TopReloadIndicator: View {
 
 private struct ServiceHomeView: View {
     @EnvironmentObject private var locationProvider: LocationProvider
+    @AppStorage("shopcapture.usesManualCity") private var usesManualCity = false
+    @AppStorage("shopcapture.manualCityName") private var manualCityName = ""
+    @AppStorage("shopcapture.manualCityLatitude") private var manualCityLatitude = 0.0
+    @AppStorage("shopcapture.manualCityLongitude") private var manualCityLongitude = 0.0
     @State private var shops: [RecommendedShop] = []
     @State private var hotSearches: [String] = []
     @State private var city = "石家庄市"
@@ -162,6 +166,8 @@ private struct ServiceHomeView: View {
     @State private var hasLoadedHome = false
     @State private var isReloading = false
     @State private var hasPendingReload = false
+    @State private var activeLatitude: Double?
+    @State private var activeLongitude: Double?
 
     var body: some View {
         NavigationStack {
@@ -206,23 +212,23 @@ private struct ServiceHomeView: View {
 
     private var header: some View {
         HStack {
-            Button {
-                Task {
-                    await reloadHome()
+            NavigationLink {
+                CitySelectionView(selectedCityName: city) { selection in
+                    applyCitySelection(selection)
                 }
             } label: {
                 HStack(spacing: 7) {
                     Image(systemName: "mappin.circle.fill")
                     Text(city)
                         .font(.title3.weight(.bold))
-                    Image(systemName: "location.fill")
+                    Image(systemName: "chevron.down")
                         .font(.caption.weight(.bold))
                 }
                 .foregroundStyle(DesignTokens.ink)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("定位到当前城市")
+            .accessibilityLabel("选择城市，当前\(city)")
 
             Spacer()
         }
@@ -276,11 +282,9 @@ private struct ServiceHomeView: View {
                     .frame(height: 26)
 
                 Button {
-                    Task {
-                        await reloadHome()
-                    }
+                    applyCitySelection(nil)
                 } label: {
-                    Label(district, systemImage: "location.circle")
+                    Label(usesManualCity ? "当前位置" : district, systemImage: "location.circle")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(DesignTokens.ink)
                         .lineLimit(1)
@@ -347,7 +351,11 @@ private struct ServiceHomeView: View {
 
             if !shops.isEmpty {
                 NavigationLink {
-                    AllRecommendedShopsView(keyword: searchText)
+                    AllRecommendedShopsView(
+                        keyword: searchText,
+                        latitude: activeLatitude,
+                        longitude: activeLongitude
+                    )
                 } label: {
                     HStack {
                         Spacer()
@@ -436,10 +444,21 @@ private struct ServiceHomeView: View {
 
     @MainActor
     private func loadHome(keyword: String = "") async {
-        locationProvider.requestWhenInUseAuthorization()
-        await waitForLocationAuthorizationIfNeeded()
-        let location = await locationProvider.currentLocation(timeout: 2)
-        let locationName = await resolveLocationName(location)
+        let location: CLLocation?
+        let locationName: (city: String, district: String)?
+
+        if usesManualCity, !manualCityName.isEmpty, manualCityLatitude != 0, manualCityLongitude != 0 {
+            location = CLLocation(latitude: manualCityLatitude, longitude: manualCityLongitude)
+            locationName = (manualCityName, "手动选择")
+        } else {
+            locationProvider.requestWhenInUseAuthorization()
+            await waitForLocationAuthorizationIfNeeded()
+            location = await locationProvider.currentLocation(timeout: 2)
+            locationName = await resolveLocationName(location)
+        }
+
+        activeLatitude = location?.coordinate.latitude
+        activeLongitude = location?.coordinate.longitude
 
         do {
             let feed = try await ShopFeedAPIClient.fetchHome(
@@ -496,6 +515,347 @@ private struct ServiceHomeView: View {
             return nil
         }
     }
+
+    private func applyCitySelection(_ selection: CityOption?) {
+        if let selection {
+            usesManualCity = true
+            manualCityName = selection.name
+            manualCityLatitude = selection.latitude
+            manualCityLongitude = selection.longitude
+            city = selection.name
+            district = "手动选择"
+        } else {
+            usesManualCity = false
+            manualCityName = ""
+            manualCityLatitude = 0
+            manualCityLongitude = 0
+            city = "正在定位"
+            district = "当前位置"
+        }
+
+        Task {
+            await reloadHome()
+        }
+    }
+}
+
+struct CityOption: Identifiable, Hashable {
+    let name: String
+    let latitude: Double
+    let longitude: Double
+
+    var id: String { name }
+
+    var pinyin: String {
+        name
+            .applyingTransform(.toLatin, reverse: false)?
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .uppercased() ?? name
+    }
+
+    var initial: String {
+        String(pinyin.prefix(1))
+    }
+}
+
+private struct CitySelectionView: View {
+    @Environment(\.dismiss) private var dismiss
+    let selectedCityName: String
+    let onSelect: (CityOption?) -> Void
+
+    @State private var searchText = ""
+    @State private var isGeocoding = false
+    @State private var geocodingMessage: String?
+
+    private let popularCityNames = ["北京", "上海", "广州", "深圳", "成都", "杭州", "重庆", "石家庄"]
+
+    private var filteredCities: [CityOption] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return Self.cities }
+        let normalized = query.uppercased()
+        return Self.cities.filter {
+            $0.name.localizedCaseInsensitiveContains(query) || $0.pinyin.contains(normalized)
+        }
+    }
+
+    private var sections: [(initial: String, cities: [CityOption])] {
+        Dictionary(grouping: Self.cities, by: \.initial)
+            .map { (initial: $0.key, cities: $0.value.sorted { $0.pinyin < $1.pinyin }) }
+            .sorted { $0.initial < $1.initial }
+    }
+
+    private var popularCities: [CityOption] {
+        popularCityNames.compactMap { name in
+            Self.cities.first { $0.name == name }
+        }
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            List {
+                Section("当前城市") {
+                    Button {
+                        onSelect(nil)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "location.fill")
+                                .foregroundStyle(ProfilePalette.systemBlue)
+                            Text(selectedCityName)
+                                .foregroundStyle(ProfilePalette.label)
+                            Spacer()
+                            Text("重新定位")
+                                .foregroundStyle(ProfilePalette.systemBlue)
+                        }
+                    }
+                }
+
+                if searchText.isEmpty {
+                    Section("热门城市") {
+                        cityGrid(popularCities)
+                    }
+
+                    Section("字母索引") {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 42), spacing: 10)], spacing: 10) {
+                            ForEach(sections.map(\.initial), id: \.self) { initial in
+                                Button(initial) {
+                                    withAnimation {
+                                        proxy.scrollTo(initial, anchor: .top)
+                                    }
+                                }
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(ProfilePalette.label)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 42)
+                                .background(Color(uiColor: .tertiarySystemGroupedBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+
+                    ForEach(sections, id: \.initial) { section in
+                        Section {
+                            ForEach(section.cities) { city in
+                                cityRow(city)
+                            }
+                        } header: {
+                            Text(section.initial)
+                                .id(section.initial)
+                        }
+                    }
+                } else {
+                    Section("搜索结果") {
+                        ForEach(filteredCities) { city in
+                            cityRow(city)
+                        }
+
+                        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           !filteredCities.contains(where: { $0.name == searchText }) {
+                            Button {
+                                Task {
+                                    await geocodeSearchText()
+                                }
+                            } label: {
+                                Label("使用“\(searchText)”", systemImage: "magnifyingglass.circle.fill")
+                                    .lineLimit(1)
+                            }
+                            .disabled(isGeocoding)
+                        }
+
+                        if let geocodingMessage {
+                            Text(geocodingMessage)
+                                .font(.footnote)
+                                .foregroundStyle(ProfilePalette.secondaryLabel)
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .safeAreaPadding(.trailing, searchText.isEmpty ? 22 : 0)
+            .searchable(text: $searchText, prompt: "搜索城市或拼音")
+            .overlay(alignment: .trailing) {
+                if searchText.isEmpty {
+                    VStack(spacing: 2) {
+                        ForEach(sections.map(\.initial), id: \.self) { initial in
+                            Button(initial) {
+                                proxy.scrollTo(initial, anchor: .top)
+                            }
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(ProfilePalette.systemBlue)
+                            .frame(width: 24, height: 15)
+                        }
+                    }
+                    .padding(.trailing, 2)
+                }
+            }
+        }
+        .navigationTitle("选择城市")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func cityGrid(_ cities: [CityOption]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 10)], spacing: 10) {
+            ForEach(cities) { city in
+                Button(city.name) {
+                    select(city)
+                }
+                .font(.subheadline)
+                .foregroundStyle(ProfilePalette.label)
+                .frame(maxWidth: .infinity)
+                .frame(height: 40)
+                .background(Color(uiColor: .tertiarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func cityRow(_ city: CityOption) -> some View {
+        Button {
+            select(city)
+        } label: {
+            HStack {
+                Text(city.name)
+                    .foregroundStyle(ProfilePalette.label)
+                Spacer()
+                if city.name == selectedCityName {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(ProfilePalette.systemBlue)
+                }
+            }
+        }
+    }
+
+    private func select(_ city: CityOption) {
+        onSelect(city)
+        dismiss()
+    }
+
+    @MainActor
+    private func geocodeSearchText() async {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, !isGeocoding else { return }
+
+        isGeocoding = true
+        defer { isGeocoding = false }
+        geocodingMessage = nil
+
+        do {
+            guard let placemark = try await CLGeocoder()
+                .geocodeAddressString("\(query), 中国")
+                .first,
+                  let location = placemark.location else {
+                geocodingMessage = "未找到该城市"
+                return
+            }
+            let name = placemark.locality ?? placemark.administrativeArea ?? query
+            select(CityOption(
+                name: name,
+                latitude: location.coordinate.latitude,
+                longitude: location.coordinate.longitude
+            ))
+        } catch {
+            geocodingMessage = "城市搜索失败，请稍后重试"
+        }
+    }
+
+    private static let cities: [CityOption] = [
+        CityOption(name: "安庆", latitude: 30.54, longitude: 117.06),
+        CityOption(name: "鞍山", latitude: 41.11, longitude: 122.99),
+        CityOption(name: "北京", latitude: 39.90, longitude: 116.41),
+        CityOption(name: "保定", latitude: 38.87, longitude: 115.46),
+        CityOption(name: "包头", latitude: 40.66, longitude: 109.84),
+        CityOption(name: "北海", latitude: 21.48, longitude: 109.12),
+        CityOption(name: "蚌埠", latitude: 32.92, longitude: 117.39),
+        CityOption(name: "成都", latitude: 30.57, longitude: 104.07),
+        CityOption(name: "重庆", latitude: 29.56, longitude: 106.55),
+        CityOption(name: "长沙", latitude: 28.23, longitude: 112.94),
+        CityOption(name: "长春", latitude: 43.82, longitude: 125.32),
+        CityOption(name: "常州", latitude: 31.81, longitude: 119.97),
+        CityOption(name: "沧州", latitude: 38.30, longitude: 116.84),
+        CityOption(name: "大连", latitude: 38.91, longitude: 121.61),
+        CityOption(name: "东莞", latitude: 23.02, longitude: 113.75),
+        CityOption(name: "大庆", latitude: 46.59, longitude: 125.10),
+        CityOption(name: "德州", latitude: 37.44, longitude: 116.36),
+        CityOption(name: "鄂尔多斯", latitude: 39.61, longitude: 109.78),
+        CityOption(name: "福州", latitude: 26.07, longitude: 119.30),
+        CityOption(name: "佛山", latitude: 23.02, longitude: 113.12),
+        CityOption(name: "抚顺", latitude: 41.88, longitude: 123.96),
+        CityOption(name: "广州", latitude: 23.13, longitude: 113.26),
+        CityOption(name: "贵阳", latitude: 26.65, longitude: 106.63),
+        CityOption(name: "桂林", latitude: 25.27, longitude: 110.29),
+        CityOption(name: "赣州", latitude: 25.83, longitude: 114.93),
+        CityOption(name: "杭州", latitude: 30.27, longitude: 120.15),
+        CityOption(name: "哈尔滨", latitude: 45.80, longitude: 126.53),
+        CityOption(name: "合肥", latitude: 31.82, longitude: 117.23),
+        CityOption(name: "海口", latitude: 20.04, longitude: 110.20),
+        CityOption(name: "呼和浩特", latitude: 40.84, longitude: 111.75),
+        CityOption(name: "邯郸", latitude: 36.63, longitude: 114.54),
+        CityOption(name: "惠州", latitude: 23.11, longitude: 114.42),
+        CityOption(name: "济南", latitude: 36.65, longitude: 117.12),
+        CityOption(name: "嘉兴", latitude: 30.75, longitude: 120.76),
+        CityOption(name: "金华", latitude: 29.08, longitude: 119.65),
+        CityOption(name: "吉林", latitude: 43.84, longitude: 126.55),
+        CityOption(name: "江门", latitude: 22.58, longitude: 113.08),
+        CityOption(name: "九江", latitude: 29.71, longitude: 116.00),
+        CityOption(name: "昆明", latitude: 25.04, longitude: 102.71),
+        CityOption(name: "开封", latitude: 34.80, longitude: 114.31),
+        CityOption(name: "兰州", latitude: 36.06, longitude: 103.83),
+        CityOption(name: "洛阳", latitude: 34.62, longitude: 112.45),
+        CityOption(name: "临沂", latitude: 35.10, longitude: 118.36),
+        CityOption(name: "柳州", latitude: 24.33, longitude: 109.42),
+        CityOption(name: "拉萨", latitude: 29.65, longitude: 91.17),
+        CityOption(name: "连云港", latitude: 34.60, longitude: 119.22),
+        CityOption(name: "绵阳", latitude: 31.47, longitude: 104.68),
+        CityOption(name: "南京", latitude: 32.06, longitude: 118.80),
+        CityOption(name: "宁波", latitude: 29.87, longitude: 121.55),
+        CityOption(name: "南昌", latitude: 28.68, longitude: 115.86),
+        CityOption(name: "南宁", latitude: 22.82, longitude: 108.37),
+        CityOption(name: "南通", latitude: 31.98, longitude: 120.89),
+        CityOption(name: "莆田", latitude: 25.45, longitude: 119.01),
+        CityOption(name: "平顶山", latitude: 33.74, longitude: 113.19),
+        CityOption(name: "青岛", latitude: 36.07, longitude: 120.38),
+        CityOption(name: "泉州", latitude: 24.87, longitude: 118.68),
+        CityOption(name: "秦皇岛", latitude: 39.94, longitude: 119.60),
+        CityOption(name: "曲靖", latitude: 25.49, longitude: 103.80),
+        CityOption(name: "日照", latitude: 35.42, longitude: 119.53),
+        CityOption(name: "上海", latitude: 31.23, longitude: 121.47),
+        CityOption(name: "深圳", latitude: 22.54, longitude: 114.06),
+        CityOption(name: "石家庄", latitude: 38.04, longitude: 114.51),
+        CityOption(name: "苏州", latitude: 31.30, longitude: 120.58),
+        CityOption(name: "沈阳", latitude: 41.80, longitude: 123.43),
+        CityOption(name: "汕头", latitude: 23.35, longitude: 116.68),
+        CityOption(name: "绍兴", latitude: 30.00, longitude: 120.58),
+        CityOption(name: "三亚", latitude: 18.25, longitude: 109.51),
+        CityOption(name: "天津", latitude: 39.09, longitude: 117.20),
+        CityOption(name: "太原", latitude: 37.87, longitude: 112.55),
+        CityOption(name: "唐山", latitude: 39.63, longitude: 118.18),
+        CityOption(name: "台州", latitude: 28.66, longitude: 121.42),
+        CityOption(name: "武汉", latitude: 30.59, longitude: 114.30),
+        CityOption(name: "无锡", latitude: 31.49, longitude: 120.31),
+        CityOption(name: "温州", latitude: 28.00, longitude: 120.70),
+        CityOption(name: "乌鲁木齐", latitude: 43.83, longitude: 87.62),
+        CityOption(name: "威海", latitude: 37.51, longitude: 122.12),
+        CityOption(name: "潍坊", latitude: 36.71, longitude: 119.16),
+        CityOption(name: "西安", latitude: 34.34, longitude: 108.94),
+        CityOption(name: "厦门", latitude: 24.48, longitude: 118.09),
+        CityOption(name: "徐州", latitude: 34.20, longitude: 117.28),
+        CityOption(name: "西宁", latitude: 36.62, longitude: 101.78),
+        CityOption(name: "湘潭", latitude: 27.83, longitude: 112.94),
+        CityOption(name: "襄阳", latitude: 32.01, longitude: 112.12),
+        CityOption(name: "银川", latitude: 38.49, longitude: 106.23),
+        CityOption(name: "烟台", latitude: 37.46, longitude: 121.45),
+        CityOption(name: "扬州", latitude: 32.39, longitude: 119.41),
+        CityOption(name: "宜昌", latitude: 30.69, longitude: 111.29),
+        CityOption(name: "义乌", latitude: 29.31, longitude: 120.08),
+        CityOption(name: "郑州", latitude: 34.75, longitude: 113.62),
+        CityOption(name: "珠海", latitude: 22.27, longitude: 113.58),
+        CityOption(name: "中山", latitude: 22.52, longitude: 113.39),
+        CityOption(name: "镇江", latitude: 32.19, longitude: 119.42),
+        CityOption(name: "淄博", latitude: 36.81, longitude: 118.05),
+        CityOption(name: "株洲", latitude: 27.83, longitude: 113.13)
+    ]
 }
 
 private struct RecommendedShopRow: View {
@@ -595,12 +955,17 @@ private struct RecommendedShopRow: View {
 }
 
 private struct AllRecommendedShopsView: View {
-    @EnvironmentObject private var locationProvider: LocationProvider
     let keyword: String
+    let latitude: Double?
+    let longitude: Double?
 
     @State private var shops: [RecommendedShop] = []
     @State private var isLoading = false
     @State private var loadFailed = false
+    @State private var nextPage = 1
+    @State private var hasMorePages = true
+
+    private let pageSize = 20
 
     var body: some View {
         Group {
@@ -615,7 +980,7 @@ private struct AllRecommendedShopsView: View {
                     if loadFailed {
                         Button("重新加载") {
                             Task {
-                                await loadShops()
+                                await loadShops(reset: true)
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -629,10 +994,25 @@ private struct AllRecommendedShopsView: View {
                         RecommendedShopRow(shop: shop, showsDisclosureIndicator: false)
                     }
                     .listRowInsets(EdgeInsets())
+                    .onAppear {
+                        guard shop.id == shops.last?.id else { return }
+                        Task {
+                            await loadShops(reset: false)
+                        }
+                    }
+
+                    if shop.id == shops.last?.id, isLoading, !shops.isEmpty {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .listRowSeparator(.hidden)
+                    }
                 }
                 .listStyle(.plain)
                 .refreshable {
-                    await loadShops()
+                    await loadShops(reset: true)
                 }
             }
         }
@@ -644,29 +1024,51 @@ private struct AllRecommendedShopsView: View {
         .navigationTitle(keyword.isEmpty ? "全部店铺" : "搜索结果")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await loadShops()
+            guard shops.isEmpty else { return }
+            await loadShops(reset: true)
         }
     }
 
     @MainActor
-    private func loadShops() async {
-        guard !isLoading else { return }
+    private func loadShops(reset: Bool) async {
+        guard !isLoading, reset || hasMorePages else { return }
 
         isLoading = true
         defer { isLoading = false }
 
-        locationProvider.requestWhenInUseAuthorization()
-        let location = await locationProvider.currentLocation(timeout: 2)
+        if reset {
+            nextPage = 1
+            hasMorePages = true
+            loadFailed = false
+        }
 
         do {
-            let feedShops = try await ShopFeedAPIClient.fetchAllShops(
-                latitude: location?.coordinate.latitude,
-                longitude: location?.coordinate.longitude,
-                keyword: keyword
-            )
-            shops = feedShops.enumerated().map { index, shop in
-                shop.recommendedShop(fallbackRank: index + 1)
+            var page = nextPage
+            var accumulated: [FeedShop] = []
+            var pageHasMore = true
+
+            repeat {
+                let result = try await ShopFeedAPIClient.fetchAllShops(
+                    latitude: latitude,
+                    longitude: longitude,
+                    keyword: keyword,
+                    page: page,
+                    pageSize: pageSize
+                )
+                accumulated.append(contentsOf: result.items)
+                pageHasMore = result.hasMore
+                page += 1
+            } while accumulated.isEmpty && pageHasMore
+
+            let mapped = accumulated.enumerated().map { index, shop in
+                let rank = (reset ? 0 : shops.count) + index + 1
+                return shop.withRank(rank).recommendedShop(fallbackRank: rank)
             }
+            let existingIDs = reset ? Set<String>() : Set(shops.map(\.id))
+            let newShops = mapped.filter { !existingIDs.contains($0.id) }
+            shops = reset ? newShops : shops + newShops
+            nextPage = page
+            hasMorePages = pageHasMore
             loadFailed = false
         } catch {
             loadFailed = true
@@ -947,6 +1349,9 @@ private struct StreetVerifyTaskView: View {
     @State private var hasLoadedRecords = false
     @State private var reviewRecords: [StreetReviewRecord] = []
     @State private var loadErrorMessage: String?
+    @State private var isLoadingMore = false
+    @State private var nextPage = 1
+    @State private var hasMorePages = true
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(keyPath: \ShopRecord.timestamp, ascending: false)],
         animation: .default
@@ -996,10 +1401,24 @@ private struct StreetVerifyTaskView: View {
                     .padding(.top, 12)
 
                     ScrollView(showsIndicators: false) {
-                        StreetRecordList(status: selectedStatus, records: selectedRecords)
-                            .padding(.horizontal, 16)
-                            .padding(.top, 4)
-                            .padding(.bottom, 96)
+                        VStack(spacing: 12) {
+                            StreetRecordList(status: selectedStatus, records: selectedRecords)
+
+                            if hasMorePages {
+                                ProgressView(isLoadingMore ? "正在加载更多" : "")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .id(nextPage)
+                                    .onAppear {
+                                        Task {
+                                            await loadNextStreetPage()
+                                        }
+                                    }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                        .padding(.bottom, 96)
                     }
                     .refreshable {
                         await reloadStreetRecords()
@@ -1067,23 +1486,51 @@ private struct StreetVerifyTaskView: View {
         isReloading = true
         defer { isReloading = false }
 
-        let localRecords = Array(records).map(localReviewRecord)
+        nextPage = 1
+        hasMorePages = true
+        loadErrorMessage = nil
+        reviewRecords = Array(records).map(localReviewRecord)
+        await loadNextStreetPage()
+    }
+
+    @MainActor
+    private func loadNextStreetPage() async {
+        guard !isLoadingMore, hasMorePages else { return }
+
+        isLoadingMore = true
+        defer { isLoadingMore = false }
 
         do {
-            let serverRecords = try await ShopFeedAPIClient.fetchStreetRecords()
-            var recordsByClientUUID: [String: StreetReviewRecord] = [:]
-            for record in serverRecords where !record.clientUUID.isEmpty {
-                recordsByClientUUID[record.clientUUID.lowercased()] = record
-            }
-
-            reviewRecords = localRecords.map { localRecord in
-                recordsByClientUUID[localRecord.clientUUID.lowercased()] ?? localRecord
-            }
+            let result = try await ShopFeedAPIClient.fetchStreetRecords(page: nextPage, pageSize: 20)
+            mergeStreetRecords(result.items)
+            nextPage = result.page + 1
+            hasMorePages = result.hasMore
             loadErrorMessage = nil
         } catch {
-            reviewRecords = localRecords
-            loadErrorMessage = "接口加载失败，当前显示本机待审核记录"
+            loadErrorMessage = nextPage == 1
+                ? "接口加载失败，当前显示本机待审核记录"
+                : "更多记录加载失败，请稍后重试"
         }
+    }
+
+    private func mergeStreetRecords(_ serverRecords: [StreetReviewRecord]) {
+        var recordsByKey: [String: StreetReviewRecord] = [:]
+        for record in reviewRecords {
+            recordsByKey[streetRecordKey(record)] = record
+        }
+        for record in serverRecords {
+            recordsByKey[streetRecordKey(record)] = record
+        }
+        reviewRecords = recordsByKey.values.sorted {
+            ($0.capturedAt ?? .distantPast) > ($1.capturedAt ?? .distantPast)
+        }
+    }
+
+    private func streetRecordKey(_ record: StreetReviewRecord) -> String {
+        if !record.clientUUID.isEmpty {
+            return "uuid:\(record.clientUUID.lowercased())"
+        }
+        return "id:\(record.id)"
     }
 
     private func localReviewRecord(_ record: ShopRecord) -> StreetReviewRecord {
@@ -1344,9 +1791,6 @@ private struct ProfileRowDivider: View {
 
 private struct ProfileSettingsView: View {
     @EnvironmentObject private var authSession: AuthSession
-    @State private var alipayAccount = ""
-    @State private var alipayName = ""
-    @State private var statusMessage: String?
     @State private var isWorking = false
 
     var body: some View {
@@ -1363,18 +1807,6 @@ private struct ProfileSettingsView: View {
                         settingsMenu(account)
                     }
 
-                    alipayCard
-
-                    if let statusMessage {
-                        Text(statusMessage)
-                            .font(.footnote)
-                            .foregroundStyle(ProfilePalette.secondaryLabel)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(14)
-                            .background(ProfilePalette.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-
                     logoutButton
                 }
                 .padding(.horizontal, 16)
@@ -1384,10 +1816,6 @@ private struct ProfileSettingsView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            alipayAccount = authSession.account?.alipayAccount ?? ""
-            alipayName = authSession.account?.alipayName ?? ""
-        }
     }
 
     private func settingsMenu(_ account: UserAccountSummary) -> some View {
@@ -1414,18 +1842,24 @@ private struct ProfileSettingsView: View {
             ProfileRowDivider()
 
             NavigationLink {
+                PaymentInformationView()
+            } label: {
+                ProfileActionRow(
+                    title: "收款信息",
+                    value: paymentStatus(account),
+                    symbol: "creditcard.fill",
+                    tint: ProfilePalette.systemGreen
+                )
+            }
+            .buttonStyle(.plain)
+
+            ProfileRowDivider()
+
+            NavigationLink {
                 ProfileInformationView(
                     title: "账号信息",
                     items: [
                         ProfileInformationItem(title: "账号", value: account.profile.accountLine),
-                        ProfileInformationItem(
-                            title: "收款支付宝",
-                            value: account.alipayAccount.isEmpty ? "未绑定" : account.alipayAccount
-                        ),
-                        ProfileInformationItem(
-                            title: "收款姓名",
-                            value: account.alipayName.isEmpty ? "未设置" : account.alipayName
-                        ),
                         ProfileInformationItem(title: "同步状态", value: account.profile.syncStatus)
                     ]
                 )
@@ -1443,12 +1877,48 @@ private struct ProfileSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private var alipayCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("收款支付宝")
-                .font(.headline)
-                .foregroundStyle(ProfilePalette.label)
+    private func paymentStatus(_ account: UserAccountSummary) -> String {
+        let value = account.alipayAccount
+        guard !value.isEmpty else { return "未设置" }
+        guard value.count > 7 else { return "已设置" }
+        return "\(value.prefix(3))****\(value.suffix(3))"
+    }
 
+    private var logoutButton: some View {
+        Button(role: .destructive) {
+            Task {
+                await logout()
+            }
+        } label: {
+            Text("退出登录")
+                .font(.body)
+                .foregroundStyle(ProfilePalette.systemRed)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(ProfilePalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .disabled(isWorking)
+        .opacity(isWorking ? 0.55 : 1)
+    }
+
+    private func logout() async {
+        isWorking = true
+        defer { isWorking = false }
+
+        await authSession.logout()
+    }
+}
+
+private struct PaymentInformationView: View {
+    @EnvironmentObject private var authSession: AuthSession
+    @State private var alipayAccount = ""
+    @State private var alipayName = ""
+    @State private var statusMessage: String?
+    @State private var isWorking = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
             TextField("支付宝账号", text: $alipayAccount)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -1471,28 +1941,25 @@ private struct ProfileSettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .disabled(isWorking || alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || alipayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.footnote)
+                    .foregroundStyle(ProfilePalette.secondaryLabel)
+            }
         }
         .padding(16)
         .background(ProfilePalette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-
-    private var logoutButton: some View {
-        Button(role: .destructive) {
-            Task {
-                await logout()
-            }
-        } label: {
-            Text("退出登录")
-                .font(.body)
-                .foregroundStyle(ProfilePalette.systemRed)
-                .frame(maxWidth: .infinity)
-                .frame(height: 50)
-                .background(ProfilePalette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(16)
+        .background(ProfilePalette.groupedBackground)
+        .navigationTitle("收款信息")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            alipayAccount = authSession.account?.alipayAccount ?? ""
+            alipayName = authSession.account?.alipayName ?? ""
         }
-        .disabled(isWorking)
-        .opacity(isWorking ? 0.55 : 1)
     }
 
     private func saveAlipay() async {
@@ -1513,13 +1980,6 @@ private struct ProfileSettingsView: View {
         }
     }
 
-    private func logout() async {
-        isWorking = true
-        defer { isWorking = false }
-
-        await authSession.logout()
-        statusMessage = nil
-    }
 }
 
 private struct ProfileInformationItem: Identifiable {
@@ -1626,7 +2086,7 @@ private struct WithdrawView: View {
 
             if account.alipayAccount.isEmpty || account.alipayName.isEmpty {
                 NavigationLink {
-                    ProfileSettingsView()
+                    PaymentInformationView()
                 } label: {
                     Text("去配置收款支付宝")
                         .font(.subheadline.weight(.bold))
