@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct AppHomeView: View {
     var body: some View {
@@ -18,7 +19,7 @@ struct AppHomeView: View {
                     Label("我的", systemImage: "person.fill")
                 }
         }
-        .tint(DesignTokens.emerald)
+        .tint(ProfilePalette.systemBlue)
     }
 }
 
@@ -755,33 +756,45 @@ private struct ProfileCenterView: View {
     @EnvironmentObject private var authSession: AuthSession
     @State private var statusMessage: String?
     @State private var isWorking = false
+    @State private var isShowingAccountDetails = false
 
     var body: some View {
         NavigationStack {
             ZStack {
-                DesignTokens.background.ignoresSafeArea()
+                ProfilePalette.groupedBackground.ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 20) {
                         header
+
                         if let account = authSession.account {
-                            accountCard(account)
+                            balanceOverview(account)
+                            accountActions(account)
                             logoutButton
+                        } else {
+                            ProgressView("正在加载账户")
+                                .font(.subheadline)
+                                .foregroundStyle(ProfilePalette.secondaryLabel)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 36)
                         }
 
                         if let statusMessage {
                             Text(statusMessage)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(DesignTokens.secondaryText)
+                                .font(.footnote)
+                                .foregroundStyle(ProfilePalette.secondaryLabel)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(14)
-                                .background(.white.opacity(0.72))
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .background(ProfilePalette.surface)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 18)
-                    .padding(.bottom, 28)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 24)
+                }
+                .refreshable {
+                    await refreshAccount()
                 }
             }
             .navigationBarHidden(true)
@@ -797,40 +810,43 @@ private struct ProfileCenterView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text("我的")
-                    .font(.system(size: 34, weight: .black, design: .rounded))
-                    .foregroundStyle(DesignTokens.ink)
-            }
+        HStack(alignment: .center) {
+            Text("我的")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(ProfilePalette.label)
 
             Spacer()
 
             NavigationLink {
                 ProfileSettingsView()
             } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(DesignTokens.ink)
-                    .frame(width: 52, height: 52)
-                    .background(.white)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(DesignTokens.line, lineWidth: 1))
+                Image(systemName: "gearshape")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(ProfilePalette.systemBlue)
+                    .frame(width: 44, height: 44)
             }
             .accessibilityLabel("设置")
         }
     }
 
-    private func accountCard(_ account: UserAccountSummary) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .lastTextBaseline) {
-                Text("\(account.coins)")
-                    .font(.system(size: 42, weight: .black, design: .rounded))
-                    .foregroundStyle(DesignTokens.ink)
+    private func balanceOverview(_ account: UserAccountSummary) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("可提现金币")
+                        .font(.footnote)
+                        .foregroundStyle(ProfilePalette.secondaryLabel)
 
-                Text("金币")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(DesignTokens.secondaryText)
+                    HStack(alignment: .lastTextBaseline, spacing: 6) {
+                        Text("\(account.coins)")
+                            .font(.system(size: 42, weight: .semibold))
+                            .foregroundStyle(ProfilePalette.label)
+
+                        Text("金币")
+                            .font(.subheadline)
+                            .foregroundStyle(ProfilePalette.secondaryLabel)
+                    }
+                }
 
                 Spacer()
 
@@ -838,26 +854,106 @@ private struct ProfileCenterView: View {
                     WithdrawView()
                 } label: {
                     Text("提现")
-                        .font(.subheadline.weight(.bold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 9)
-                        .background(DesignTokens.emerald)
-                        .clipShape(Capsule())
+                        .padding(.horizontal, 18)
+                        .frame(height: 38)
+                        .background(ProfilePalette.systemBlue)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
+            .padding(16)
 
-            Divider()
+            Rectangle()
+                .fill(ProfilePalette.separator)
+                .frame(height: 0.5)
 
-            ProfileInfoRow(title: "名称", value: account.profile.displayName, symbol: "person.fill")
-            Divider()
-            ProfileInfoRow(title: "账号", value: account.profile.accountLine, symbol: "number")
-            Divider()
-            ProfileInfoRow(title: "身份", value: account.profile.roleName, symbol: "shield.lefthalf.filled")
-            Divider()
-            ProfileInfoRow(title: "状态", value: account.profile.syncStatus, symbol: "checkmark.circle.fill")
+            HStack(spacing: 0) {
+                ProfileMetric(title: "名称", value: account.profile.displayName)
+
+                ProfileMetricDivider()
+
+                ProfileMetric(title: "账号", value: account.profile.accountLine)
+
+                ProfileMetricDivider()
+
+                ProfileMetric(title: "身份", value: account.profile.roleName)
+            }
+            .padding(.vertical, 14)
         }
-        .profilePanelStyle()
+        .background(ProfilePalette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func accountActions(_ account: UserAccountSummary) -> some View {
+        VStack(spacing: 0) {
+            ProfileActionRow(
+                title: "登录状态",
+                value: "已登录",
+                symbol: "checkmark.circle.fill",
+                tint: ProfilePalette.systemGreen,
+                showsChevron: false
+            )
+
+            ProfileRowDivider()
+
+            NavigationLink {
+                ProfileSettingsView()
+            } label: {
+                ProfileActionRow(
+                    title: "收款支付宝",
+                    value: account.alipayAccount.isEmpty ? "未绑定" : "已绑定",
+                    symbol: "creditcard.fill",
+                    tint: ProfilePalette.systemOrange
+                )
+            }
+            .buttonStyle(.plain)
+
+            ProfileRowDivider()
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isShowingAccountDetails.toggle()
+                }
+            } label: {
+                ProfileActionRow(
+                    title: "账号信息",
+                    value: isShowingAccountDetails ? "收起" : nil,
+                    symbol: "person.text.rectangle.fill",
+                    tint: ProfilePalette.systemBlue,
+                    chevronDirection: isShowingAccountDetails ? "chevron.up" : "chevron.down"
+                )
+            }
+            .buttonStyle(.plain)
+
+            if isShowingAccountDetails {
+                ProfileRowDivider()
+
+                VStack(spacing: 0) {
+                    ProfileDetailRow(title: "名称", value: account.profile.displayName)
+                    ProfileDetailRow(title: "账号", value: account.profile.accountLine)
+                    ProfileDetailRow(title: "身份", value: account.profile.roleName)
+                    ProfileDetailRow(title: "状态", value: account.profile.syncStatus)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            ProfileRowDivider()
+
+            NavigationLink {
+                ProfileSettingsView()
+            } label: {
+                ProfileActionRow(
+                    title: "设置",
+                    value: nil,
+                    symbol: "gearshape.fill",
+                    tint: ProfilePalette.systemGray
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .background(ProfilePalette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var logoutButton: some View {
@@ -867,13 +963,15 @@ private struct ProfileCenterView: View {
             }
         } label: {
             Text("退出登录")
-                .font(.headline.weight(.semibold))
+                .font(.body)
+                .foregroundStyle(ProfilePalette.systemRed)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
-                .background(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .frame(height: 50)
+                .background(ProfilePalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .disabled(isWorking)
+        .opacity(isWorking ? 0.55 : 1)
     }
 
     private func logout() async {
@@ -882,6 +980,108 @@ private struct ProfileCenterView: View {
 
         await authSession.logout()
         statusMessage = nil
+    }
+}
+
+private struct ProfileMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(spacing: 5) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(ProfilePalette.secondaryLabel)
+
+            Text(value)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(ProfilePalette.label)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
+    }
+}
+
+private struct ProfileMetricDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(ProfilePalette.separator)
+            .frame(width: 0.5, height: 34)
+    }
+}
+
+private struct ProfileActionRow: View {
+    let title: String
+    let value: String?
+    let symbol: String
+    let tint: Color
+    var showsChevron = true
+    var chevronDirection = "chevron.right"
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(tint)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+            Text(title)
+                .font(.body)
+                .foregroundStyle(ProfilePalette.label)
+
+            Spacer(minLength: 10)
+
+            if let value {
+                Text(value)
+                    .font(.subheadline)
+                    .foregroundStyle(ProfilePalette.secondaryLabel)
+                    .lineLimit(1)
+            }
+
+            if showsChevron {
+                Image(systemName: chevronDirection)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ProfilePalette.tertiaryLabel)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ProfileDetailRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(.footnote)
+                .foregroundStyle(ProfilePalette.secondaryLabel)
+                .frame(width: 44, alignment: .leading)
+
+            Text(value)
+                .font(.footnote)
+                .foregroundStyle(ProfilePalette.label)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.horizontal, 56)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct ProfileRowDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(ProfilePalette.separator)
+            .frame(height: 0.5)
+            .padding(.leading, 56)
     }
 }
 
@@ -1504,6 +1704,20 @@ struct NearbyShop: Identifiable {
     let symbol: String
     let imageURL: String
     let coordinate: CGPoint
+}
+
+private enum ProfilePalette {
+    static let groupedBackground = Color(uiColor: .systemGroupedBackground)
+    static let surface = Color(uiColor: .secondarySystemGroupedBackground)
+    static let label = Color(uiColor: .label)
+    static let secondaryLabel = Color(uiColor: .secondaryLabel)
+    static let tertiaryLabel = Color(uiColor: .tertiaryLabel)
+    static let separator = Color(uiColor: .separator)
+    static let systemBlue = Color(uiColor: .systemBlue)
+    static let systemGreen = Color(uiColor: .systemGreen)
+    static let systemOrange = Color(uiColor: .systemOrange)
+    static let systemRed = Color(uiColor: .systemRed)
+    static let systemGray = Color(uiColor: .systemGray)
 }
 
 private enum DesignTokens {

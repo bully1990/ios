@@ -56,7 +56,7 @@ struct CameraCaptureView: View {
                 .ignoresSafeArea()
 
             GeometryReader { proxy in
-                let guide = CaptureGuide.region
+                let guide = captureGuideRegion
                 let width = proxy.size.width * guide.width
                 let height = proxy.size.height * guide.height
 
@@ -117,10 +117,10 @@ struct CameraCaptureView: View {
 
             if isLandscapeLayout {
                 GeometryReader { proxy in
-                    let guide = CaptureGuide.region
+                    let guide = captureGuideRegion
                     let footerWidth = min(proxy.size.width * guide.width, 520)
                     let footerY = min(proxy.size.height - 58, proxy.size.height * guide.maxY + 64)
-                    let sideX = min(proxy.size.width - 68, proxy.size.width * guide.maxX + 66)
+                    let sideX = min(proxy.size.width - 68, proxy.size.width * guide.maxX + 78)
 
                     landscapeFooterControls
                         .frame(width: footerWidth)
@@ -302,7 +302,7 @@ struct CameraCaptureView: View {
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 48)
+                        .frame(height: 60)
                         .background(.red.opacity(0.9))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
@@ -316,7 +316,7 @@ struct CameraCaptureView: View {
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 48)
+                            .frame(height: 60)
                             .background(.white.opacity(0.95))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
@@ -410,6 +410,10 @@ struct CameraCaptureView: View {
         deviceOrientation == .landscapeLeft || deviceOrientation == .landscapeRight
     }
 
+    private var captureGuideRegion: CGRect {
+        isLandscapeLayout ? CaptureGuide.landscapeRegion : CaptureGuide.region
+    }
+
     private var controlSpacing: CGFloat {
         isLandscapeLayout ? 8 : 12
     }
@@ -495,7 +499,7 @@ struct CameraCaptureView: View {
             return
         }
 
-        let guide = CaptureGuide.region
+        let guide = captureGuideRegion
         guideLayerRect = CGRect(
             x: previewSize.width * guide.minX - offset.width,
             y: previewSize.height * guide.minY - offset.height,
