@@ -12,7 +12,7 @@ struct CameraCaptureView: View {
         var startTitle: String {
             switch self {
             case .manual:
-                return "拍照"
+                return "开始扫街"
             case .automatic:
                 return "开始自动识别"
             }
@@ -291,7 +291,7 @@ struct CameraCaptureView: View {
     }
 
     private var landscapeSideActionButtons: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 26) {
             if processor.isRecognizing {
                 Button {
                     toggleRecognition()
@@ -300,7 +300,7 @@ struct CameraCaptureView: View {
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 36)
+                        .frame(height: 48)
                         .background(.red.opacity(0.9))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
@@ -314,7 +314,7 @@ struct CameraCaptureView: View {
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 36)
+                            .frame(height: 48)
                             .background(.white.opacity(0.95))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
