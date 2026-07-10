@@ -195,17 +195,18 @@ struct CameraCaptureView: View {
                     .clipShape(Capsule())
             }
 
-            Picker("识别模式", selection: $recognitionMode) {
-                ForEach(RecognitionMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+            if !processor.isRecognizing {
+                Picker("识别模式", selection: $recognitionMode) {
+                    ForEach(RecognitionMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .controlSize(isLandscapeLayout ? .small : .regular)
+                .padding(isLandscapeLayout ? 3 : 4)
+                .background(.black.opacity(0.36))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .pickerStyle(.segmented)
-            .disabled(processor.isRecognizing)
-            .controlSize(isLandscapeLayout ? .small : .regular)
-            .padding(isLandscapeLayout ? 3 : 4)
-            .background(.black.opacity(0.36))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             if processor.isRecognizing {
                 if recognitionMode == .manual {
@@ -258,17 +259,18 @@ struct CameraCaptureView: View {
                     .clipShape(Capsule())
             }
 
-            Picker("识别模式", selection: $recognitionMode) {
-                ForEach(RecognitionMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+            if !processor.isRecognizing {
+                Picker("识别模式", selection: $recognitionMode) {
+                    ForEach(RecognitionMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .padding(3)
+                .background(.black.opacity(0.36))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .pickerStyle(.segmented)
-            .disabled(processor.isRecognizing)
-            .controlSize(.small)
-            .padding(3)
-            .background(.black.opacity(0.36))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             if processor.isRecognizing {
                 zoomResetStrip
