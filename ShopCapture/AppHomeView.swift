@@ -942,7 +942,7 @@ private struct NearbyDiscoveryView: View {
 
 private struct StreetVerifyTaskView: View {
     @State private var isShowingCapture = false
-    @State private var selectedStatus: StreetRecordStatus = .history
+    @State private var selectedStatus: StreetRecordStatus = .pending
     @State private var isReloading = false
     @State private var hasLoadedRecords = false
     @State private var reviewRecords: [StreetReviewRecord] = []
@@ -955,8 +955,6 @@ private struct StreetVerifyTaskView: View {
 
     private var selectedRecords: [StreetReviewRecord] {
         switch selectedStatus {
-        case .history:
-            return reviewRecords
         case .pending:
             return reviewRecords.filter { $0.reviewState == .pending }
         case .approved:
@@ -1107,8 +1105,6 @@ private struct StreetVerifyTaskView: View {
 
     private func count(for status: StreetRecordStatus) -> Int {
         switch status {
-        case .history:
-            return reviewRecords.count
         case .pending:
             return reviewRecords.filter { $0.reviewState == .pending }.count
         case .approved:
@@ -1145,6 +1141,7 @@ private struct ProfileCenterView: View {
 
                         if let account = authSession.account {
                             balanceOverview(account)
+                            withdrawalHistoryLink
                         } else {
                             ProgressView("正在加载账户")
                                 .font(.subheadline)
@@ -1250,6 +1247,22 @@ private struct ProfileCenterView: View {
 
     private func incomeText(_ amount: Double) -> String {
         String(format: "%.2f", amount)
+    }
+
+    private var withdrawalHistoryLink: some View {
+        NavigationLink {
+            WithdrawalHistoryView()
+        } label: {
+            ProfileActionRow(
+                title: "提现明细",
+                value: nil,
+                symbol: "list.bullet.rectangle.fill",
+                tint: ProfilePalette.systemGreen
+            )
+        }
+        .buttonStyle(.plain)
+        .background(ProfilePalette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -1394,20 +1407,6 @@ private struct ProfileSettingsView: View {
                     value: nil,
                     symbol: "person.fill",
                     tint: ProfilePalette.systemBlue
-                )
-            }
-            .buttonStyle(.plain)
-
-            ProfileRowDivider()
-
-            NavigationLink {
-                WithdrawalHistoryView()
-            } label: {
-                ProfileActionRow(
-                    title: "提现明细",
-                    value: nil,
-                    symbol: "list.bullet.rectangle.fill",
-                    tint: ProfilePalette.systemGreen
                 )
             }
             .buttonStyle(.plain)
@@ -1915,7 +1914,6 @@ private struct StreetRecordList: View {
 }
 
 private enum StreetRecordStatus: String, CaseIterable, Identifiable {
-    case history
     case pending
     case approved
     case rejected
@@ -1924,8 +1922,6 @@ private enum StreetRecordStatus: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .history:
-            return "历史"
         case .pending:
             return "待审核"
         case .approved:
