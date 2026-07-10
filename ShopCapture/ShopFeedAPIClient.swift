@@ -19,6 +19,12 @@ enum ShopFeedAPIClient {
         )
     }
 
+    static func fetchAllShops(latitude: Double?, longitude: Double?, keyword: String = "") async throws -> [FeedShop] {
+        let records = try await fetchRecords()
+        let approvedRecords = filtered(records, keyword: keyword).filter { $0.isApproved }
+        return makeFeedShops(records: approvedRecords, latitude: latitude, longitude: longitude, limit: 100)
+    }
+
     static func fetchNearby(latitude: Double?, longitude: Double?, keyword: String = "", service: String = "全部") async throws -> ShopNearbyFeed {
         let query = keyword.isEmpty ? (service == "全部" ? "" : service) : keyword
         let records = filtered(try await fetchRecords(), keyword: query)
@@ -46,6 +52,17 @@ enum ShopFeedAPIClient {
         return makeFeedShops(records: records, latitude: latitude, longitude: longitude, limit: 30)
     }
 
+    static func fetchStreetRecords() async throws -> [StreetReviewRecord] {
+        try await fetchRecords()
+            .map(\.streetReviewRecord)
+            .sorted { lhs, rhs in
+                if lhs.capturedAt != rhs.capturedAt {
+                    return (lhs.capturedAt ?? .distantPast) > (rhs.capturedAt ?? .distantPast)
+                }
+                return (Int(lhs.id) ?? 0) > (Int(rhs.id) ?? 0)
+            }
+    }
+
     private static func fetchRecords() async throws -> [ShopCaptureRecord] {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [
@@ -59,6 +76,7 @@ enum ShopFeedAPIClient {
         var request = URLRequest(url: components.url!)
         request.httpMethod = "GET"
         request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -250,7 +268,7 @@ struct FeedShop: Identifiable, Sendable {
         self.symbol = ShopFeedAPIClient.serviceSymbol(text: serviceText)
         self.latitude = Double(record.latitude.value) ?? 0
         self.longitude = Double(record.longitude.value) ?? 0
-        self.imageURL = record.imageURL.value
+        self.imageURL = record.resolvedImageURL
         self.distanceMeters = distance
     }
 
@@ -435,6 +453,37 @@ struct FeedCoordinate: Sendable {
     let y: Double
 }
 
+enum StreetReviewState: String, Sendable {
+    case pending
+    case approved
+    case rejected
+
+    var title: String {
+        switch self {
+        case .pending:
+            return "待审核"
+        case .approved:
+            return "已通过"
+        case .rejected:
+            return "未通过"
+        }
+    }
+}
+
+struct StreetReviewRecord: Identifiable, Sendable {
+    let id: String
+    let clientUUID: String
+    let shopName: String
+    let serviceContent: String
+    let phoneNumber: String
+    let fullText: String
+    let imageURL: String
+    let latitude: Double
+    let longitude: Double
+    let capturedAt: Date?
+    let reviewState: StreetReviewState
+}
+
 private struct APIEnvelope<T: Decodable>: Decodable {
     let code: FlexibleInt
     let data: T
@@ -446,6 +495,7 @@ private struct APIEnvelope<T: Decodable>: Decodable {
 
 private struct ShopCaptureRecord: Decodable, Sendable {
     let id: FlexibleString
+    let clientUUID: FlexibleString
     let shopName: FlexibleString
     let serviceContent: FlexibleString
     let phoneNumber: FlexibleString
@@ -453,10 +503,13 @@ private struct ShopCaptureRecord: Decodable, Sendable {
     let imageURL: FlexibleString
     let latitude: FlexibleString
     let longitude: FlexibleString
+    let captureTime: FlexibleString
+    let createdAt: FlexibleString
     let auditStatus: FlexibleString
 
     enum CodingKeys: String, CodingKey {
         case id
+        case clientUUID = "client_uuid"
         case shopName = "shop_name"
         case serviceContent = "service_content"
         case phoneNumber = "phone_number"
@@ -464,12 +517,50 @@ private struct ShopCaptureRecord: Decodable, Sendable {
         case imageURL = "image_url"
         case latitude
         case longitude
+        case captureTime = "capture_time"
+        case createdAt = "created_at"
         case auditStatus = "audit_status"
     }
 
     var isApproved: Bool {
+        reviewState == .approved
+    }
+
+    var reviewState: StreetReviewState {
         let status = auditStatus.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return status == "1" || status == "approved" || status == "pass" || status == "passed" || status == "已通过"
+        if status == "1" || status == "approved" || status == "pass" || status == "passed" || status == "已通过" {
+            return .approved
+        }
+        if status == "2" || status == "rejected" || status == "fail" || status == "failed" || status == "未通过" {
+            return .rejected
+        }
+        return .pending
+    }
+
+    var streetReviewRecord: StreetReviewRecord {
+        let timestamp = TimeInterval(captureTime.value) ?? TimeInterval(createdAt.value)
+        return StreetReviewRecord(
+            id: id.value,
+            clientUUID: clientUUID.value,
+            shopName: shopName.value,
+            serviceContent: serviceContent.value,
+            phoneNumber: phoneNumber.value,
+            fullText: fullText.value,
+            imageURL: resolvedImageURL,
+            latitude: Double(latitude.value) ?? 0,
+            longitude: Double(longitude.value) ?? 0,
+            capturedAt: timestamp.map(Date.init(timeIntervalSince1970:)),
+            reviewState: reviewState
+        )
+    }
+
+    var resolvedImageURL: String {
+        guard !imageURL.value.isEmpty else { return "" }
+        if let url = URL(string: imageURL.value), url.scheme != nil {
+            return url.absoluteString
+        }
+        return URL(string: imageURL.value, relativeTo: URL(string: "https://api.gmpebr.com")!)?
+            .absoluteURL.absoluteString ?? imageURL.value
     }
 }
 

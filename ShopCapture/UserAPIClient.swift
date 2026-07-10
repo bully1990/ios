@@ -11,11 +11,22 @@ struct UserProfileSummary: Sendable {
 struct UserAccountSummary: Sendable {
     let profile: UserProfileSummary
     let coins: Int
+    let totalIncome: Double
+    let currentMonthIncome: Double
+    let lastMonthIncome: Double
     let alipayAccount: String
     let alipayName: String
 
     static func fallback(profile: UserProfileSummary) -> UserAccountSummary {
-        UserAccountSummary(profile: profile, coins: 0, alipayAccount: "", alipayName: "")
+        UserAccountSummary(
+            profile: profile,
+            coins: 0,
+            totalIncome: 0,
+            currentMonthIncome: 0,
+            lastMonthIncome: 0,
+            alipayAccount: "",
+            alipayName: ""
+        )
     }
 }
 
@@ -244,11 +255,35 @@ private extension UserAccountSummary {
     init(data: [String: Any]) {
         let profileData = data["user"] as? [String: Any] ?? data
         let accountData = data["account"] as? [String: Any] ?? data
+        let incomeData = accountData["income"] as? [String: Any]
+            ?? data["income"] as? [String: Any]
+            ?? accountData
 
         self.profile = UserProfileSummary(data: profileData)
         self.coins = Self.intValue(Self.firstValue(
             in: accountData,
             keys: ["coins", "coin", "gold", "金币", "balance", "points", "point"]
+        ))
+        self.totalIncome = Self.doubleValue(Self.firstValue(
+            in: incomeData,
+            keys: ["total_income", "history_income", "income_total", "total_earnings", "历史总收入"]
+        ) ?? Self.firstValue(
+            in: data,
+            keys: ["total_income", "history_income", "income_total", "total_earnings", "历史总收入"]
+        ))
+        self.currentMonthIncome = Self.doubleValue(Self.firstValue(
+            in: incomeData,
+            keys: ["month_income", "current_month_income", "income_month", "本月收入"]
+        ) ?? Self.firstValue(
+            in: data,
+            keys: ["month_income", "current_month_income", "income_month", "本月收入"]
+        ))
+        self.lastMonthIncome = Self.doubleValue(Self.firstValue(
+            in: incomeData,
+            keys: ["last_month_income", "previous_month_income", "income_last_month", "上月收入"]
+        ) ?? Self.firstValue(
+            in: data,
+            keys: ["last_month_income", "previous_month_income", "income_last_month", "上月收入"]
         ))
         self.alipayAccount = UserProfileSummary.firstNonEmpty([
             UserProfileSummary.stringValue(Self.firstValue(in: accountData, keys: ["alipay_account", "alipay", "支付宝账号"])),
@@ -272,6 +307,19 @@ private extension UserAccountSummary {
             return Int(double)
         case let string as String:
             return Int(string.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        default:
+            return 0
+        }
+    }
+
+    static func doubleValue(_ value: Any?) -> Double {
+        switch value {
+        case let int as Int:
+            return Double(int)
+        case let double as Double:
+            return double
+        case let string as String:
+            return Double(string.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         default:
             return 0
         }

@@ -2,5 +2,5 @@ import CoreGraphics
 
 enum CaptureGuide {
     static let region = CGRect(x: 0.14, y: 0.14, width: 0.72, height: 0.56)
-    static let landscapeRegion = CGRect(x: 0.14, y: 0.18, width: 0.68, height: 0.56)
+    static let landscapeRegion = CGRect(x: 0.14, y: 0.22, width: 0.68, height: 0.56)
 }

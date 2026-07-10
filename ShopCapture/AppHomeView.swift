@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreLocation
 
 struct AppHomeView: View {
     var body: some View {
@@ -20,12 +21,137 @@ struct AppHomeView: View {
                 }
         }
         .tint(ProfilePalette.systemBlue)
+        .background(TabBarDoubleTapObserver())
+    }
+}
+
+private extension Notification.Name {
+    static let homeTabDoubleTapped = Notification.Name("shopcapture.homeTabDoubleTapped")
+    static let streetTabDoubleTapped = Notification.Name("shopcapture.streetTabDoubleTapped")
+}
+
+private struct TabBarDoubleTapObserver: UIViewControllerRepresentable {
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIViewController(context: Context) -> TabBarObserverViewController {
+        let controller = TabBarObserverViewController()
+        controller.onTabBarAvailable = { [weak coordinator = context.coordinator] tabBarController in
+            coordinator?.install(on: tabBarController)
+        }
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: TabBarObserverViewController, context: Context) {
+        uiViewController.attachIfPossible()
+    }
+
+    static func dismantleUIViewController(_ uiViewController: TabBarObserverViewController, coordinator: Coordinator) {
+        coordinator.uninstall()
+    }
+
+    final class Coordinator: NSObject {
+        private weak var tabBarController: UITabBarController?
+        private weak var tabBar: UITabBar?
+        private var recognizer: UITapGestureRecognizer?
+
+        func install(on tabBarController: UITabBarController) {
+            let tabBar = tabBarController.tabBar
+            guard self.tabBar !== tabBar else { return }
+
+            uninstall()
+
+            let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            recognizer.numberOfTapsRequired = 2
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesBegan = false
+            recognizer.delaysTouchesEnded = false
+            tabBar.addGestureRecognizer(recognizer)
+
+            self.tabBarController = tabBarController
+            self.tabBar = tabBar
+            self.recognizer = recognizer
+        }
+
+        func uninstall() {
+            if let recognizer, let tabBar {
+                tabBar.removeGestureRecognizer(recognizer)
+            }
+            recognizer = nil
+            tabBar = nil
+            tabBarController = nil
+        }
+
+        @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended,
+                  let tabBar,
+                  let tabBarController,
+                  let items = tabBar.items,
+                  !items.isEmpty else {
+                return
+            }
+
+            let location = recognizer.location(in: tabBar)
+            let itemWidth = tabBar.bounds.width / CGFloat(items.count)
+            let index = min(max(Int(location.x / itemWidth), 0), items.count - 1)
+            guard index == tabBarController.selectedIndex else { return }
+
+            switch index {
+            case 0:
+                NotificationCenter.default.post(name: .homeTabDoubleTapped, object: nil)
+            case 1:
+                NotificationCenter.default.post(name: .streetTabDoubleTapped, object: nil)
+            default:
+                break
+            }
+        }
+    }
+}
+
+private final class TabBarObserverViewController: UIViewController {
+    var onTabBarAvailable: ((UITabBarController) -> Void)?
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        attachIfPossible()
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        attachIfPossible()
+    }
+
+    func attachIfPossible() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let tabBarController = self.tabBarController else { return }
+            self.onTabBarAvailable?(tabBarController)
+        }
+    }
+}
+
+private struct TopReloadIndicator: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+
+            Text("正在刷新")
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(DesignTokens.ink)
+        .padding(.horizontal, 14)
+        .frame(height: 34)
+        .background(.regularMaterial)
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("正在刷新数据")
     }
 }
 
 private struct ServiceHomeView: View {
     @EnvironmentObject private var locationProvider: LocationProvider
-    @State private var services: [String] = []
     @State private var shops: [RecommendedShop] = []
     @State private var hotSearches: [String] = []
     @State private var city = "石家庄市"
@@ -34,16 +160,17 @@ private struct ServiceHomeView: View {
     @State private var trustScore = "98.6"
     @State private var searchText = ""
     @State private var hasLoadedHome = false
+    @State private var isReloading = false
+    @State private var hasPendingReload = false
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .top) {
                 DesignTokens.background.ignoresSafeArea()
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 22) {
                         header
                         searchHero
-                        serviceShortcuts
                         recommendationSection
                         trustStrip
                         nearbyHotSearches
@@ -53,26 +180,49 @@ private struct ServiceHomeView: View {
                     .padding(.bottom, 28)
                 }
                 .refreshable {
-                    await loadHome(keyword: searchText)
+                    await reloadHome()
+                }
+
+                if isReloading {
+                    TopReloadIndicator()
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+            .animation(.easeInOut(duration: 0.2), value: isReloading)
             .navigationBarHidden(true)
             .task {
                 guard !hasLoadedHome else { return }
                 hasLoadedHome = true
-                await loadHome()
+                await reloadHome()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .homeTabDoubleTapped)) { _ in
+                Task {
+                    await reloadHome()
+                }
             }
         }
     }
 
     private var header: some View {
         HStack {
-            Image(systemName: "mappin.circle.fill")
+            Button {
+                Task {
+                    await reloadHome()
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "mappin.circle.fill")
+                    Text(city)
+                        .font(.title3.weight(.bold))
+                    Image(systemName: "location.fill")
+                        .font(.caption.weight(.bold))
+                }
                 .foregroundStyle(DesignTokens.ink)
-            Text(city)
-                .font(.title3.weight(.bold))
-            Image(systemName: "chevron.down")
-                .font(.caption.weight(.bold))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("定位到当前城市")
 
             Spacer()
         }
@@ -101,23 +251,44 @@ private struct ServiceHomeView: View {
                     .submitLabel(.search)
                     .onSubmit {
                         Task {
-                            await loadHome(keyword: searchText)
+                            await reloadHome()
                         }
                     }
 
                 Spacer()
 
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                        Task {
+                            await reloadHome()
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("清空搜索")
+                }
+
                 Divider()
                     .frame(height: 26)
 
-                Label("当前位置", systemImage: "location.circle")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(DesignTokens.ink)
-                    .onTapGesture {
-                        Task {
-                            await loadHome(keyword: searchText)
-                        }
+                Button {
+                    Task {
+                        await reloadHome()
                     }
+                } label: {
+                    Label(district, systemImage: "location.circle")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(DesignTokens.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: 108)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("使用当前位置")
             }
             .padding(.horizontal, 18)
             .frame(height: 62)
@@ -126,26 +297,6 @@ private struct ServiceHomeView: View {
                 Capsule()
                     .stroke(DesignTokens.ink, lineWidth: 1.6)
             )
-        }
-    }
-
-    private var serviceShortcuts: some View {
-        Group {
-            if !services.isEmpty {
-                HStack(spacing: 12) {
-                    ForEach(services, id: \.self) { service in
-                        Button {
-                            searchText = service
-                            Task {
-                                await loadHome(keyword: service)
-                            }
-                        } label: {
-                            ServiceShortcut(title: service)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
         }
     }
 
@@ -172,7 +323,12 @@ private struct ServiceHomeView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(shops) { shop in
-                        RecommendedShopRow(shop: shop)
+                        NavigationLink {
+                            RecommendedShopDetailView(shop: shop)
+                        } label: {
+                            RecommendedShopRow(shop: shop)
+                        }
+                        .buttonStyle(.plain)
 
                         if shop.id != shops.last?.id {
                             Divider()
@@ -190,7 +346,8 @@ private struct ServiceHomeView: View {
             }
 
             if !shops.isEmpty {
-                Button {
+                NavigationLink {
+                    AllRecommendedShopsView(keyword: searchText)
                 } label: {
                     HStack {
                         Spacer()
@@ -234,7 +391,7 @@ private struct ServiceHomeView: View {
                             Button {
                                 searchText = item
                                 Task {
-                                    await loadHome(keyword: item)
+                                    await reloadHome()
                                 }
                             } label: {
                                 Text(item)
@@ -258,9 +415,31 @@ private struct ServiceHomeView: View {
     }
 
     @MainActor
+    private func reloadHome() async {
+        guard !isReloading else {
+            hasPendingReload = true
+            return
+        }
+
+        repeat {
+            hasPendingReload = false
+            isReloading = true
+            let keyword = searchText
+            await loadHome(keyword: keyword)
+            isReloading = false
+
+            if searchText != keyword {
+                hasPendingReload = true
+            }
+        } while hasPendingReload
+    }
+
+    @MainActor
     private func loadHome(keyword: String = "") async {
         locationProvider.requestWhenInUseAuthorization()
+        await waitForLocationAuthorizationIfNeeded()
         let location = await locationProvider.currentLocation(timeout: 2)
+        let locationName = await resolveLocationName(location)
 
         do {
             let feed = try await ShopFeedAPIClient.fetchHome(
@@ -268,11 +447,10 @@ private struct ServiceHomeView: View {
                 longitude: location?.coordinate.longitude,
                 keyword: keyword
             )
-            city = feed.city
-            district = feed.district
+            city = locationName?.city ?? (location == nil ? "未定位" : feed.city)
+            district = locationName?.district ?? (location == nil ? "请开启定位" : feed.district)
             coverage = feed.coverage
             trustScore = feed.trustScore
-            services = feed.services
             hotSearches = feed.hotServices
             let mappedShops = feed.shops.enumerated().map { index, shop in
                 shop.recommendedShop(fallbackRank: index + 1)
@@ -280,49 +458,49 @@ private struct ServiceHomeView: View {
             shops = mappedShops
         } catch {
             shops = []
-            services = []
             hotSearches = []
         }
     }
-}
 
-private struct ServiceShortcut: View {
-    let title: String
+    @MainActor
+    private func waitForLocationAuthorizationIfNeeded() async {
+        guard locationProvider.authorizationStatus == .notDetermined else { return }
 
-    private var symbol: String {
-        if title.contains("手机") || title.contains("维修") { return "iphone.gen3" }
-        if title.contains("打印") || title.contains("复印") { return "printer.fill" }
-        if title.contains("清洗") || title.contains("家电") { return "washer.fill" }
-        if title.contains("锁") { return "lock.fill" }
-        return "storefront.fill"
+        for _ in 0..<30 {
+            try? await Task.sleep(for: .milliseconds(100))
+            if locationProvider.authorizationStatus != .notDetermined {
+                return
+            }
+        }
     }
 
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(DesignTokens.emerald)
-                .frame(height: 28)
+    private func resolveLocationName(_ location: CLLocation?) async -> (city: String, district: String)? {
+        guard let location else { return nil }
 
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(DesignTokens.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+        do {
+            guard let placemark = try await CLGeocoder()
+                .reverseGeocodeLocation(location)
+                .first else {
+                return nil
+            }
+
+            let resolvedCity = placemark.locality
+                ?? placemark.administrativeArea
+                ?? "当前位置"
+            let resolvedDistrict = placemark.subLocality
+                ?? placemark.thoroughfare
+                ?? placemark.name
+                ?? "附近街区"
+            return (resolvedCity, resolvedDistrict)
+        } catch {
+            return nil
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 84)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(DesignTokens.line, lineWidth: 1)
-        )
     }
 }
 
 private struct RecommendedShopRow: View {
     let shop: RecommendedShop
+    var showsDisclosureIndicator = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -402,9 +580,141 @@ private struct RecommendedShopRow: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(DesignTokens.ink)
             }
+
+            if showsDisclosureIndicator {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ProfilePalette.tertiaryLabel)
+                    .padding(.top, 36)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct AllRecommendedShopsView: View {
+    @EnvironmentObject private var locationProvider: LocationProvider
+    let keyword: String
+
+    @State private var shops: [RecommendedShop] = []
+    @State private var isLoading = false
+    @State private var loadFailed = false
+
+    var body: some View {
+        Group {
+            if shops.isEmpty && !isLoading {
+                VStack(spacing: 16) {
+                    ContentUnavailableView(
+                        loadFailed ? "店铺加载失败" : "暂无店铺",
+                        systemImage: loadFailed ? "wifi.exclamationmark" : "storefront",
+                        description: Text(loadFailed ? "请重新加载" : "暂未找到符合条件的已审核店铺")
+                    )
+
+                    if loadFailed {
+                        Button("重新加载") {
+                            Task {
+                                await loadShops()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+            } else {
+                List(shops) { shop in
+                    NavigationLink {
+                        RecommendedShopDetailView(shop: shop)
+                    } label: {
+                        RecommendedShopRow(shop: shop, showsDisclosureIndicator: false)
+                    }
+                    .listRowInsets(EdgeInsets())
+                }
+                .listStyle(.plain)
+                .refreshable {
+                    await loadShops()
+                }
+            }
+        }
+        .overlay {
+            if isLoading && shops.isEmpty {
+                ProgressView("正在加载店铺")
+            }
+        }
+        .navigationTitle(keyword.isEmpty ? "全部店铺" : "搜索结果")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await loadShops()
+        }
+    }
+
+    @MainActor
+    private func loadShops() async {
+        guard !isLoading else { return }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        locationProvider.requestWhenInUseAuthorization()
+        let location = await locationProvider.currentLocation(timeout: 2)
+
+        do {
+            let feedShops = try await ShopFeedAPIClient.fetchAllShops(
+                latitude: location?.coordinate.latitude,
+                longitude: location?.coordinate.longitude,
+                keyword: keyword
+            )
+            shops = feedShops.enumerated().map { index, shop in
+                shop.recommendedShop(fallbackRank: index + 1)
+            }
+            loadFailed = false
+        } catch {
+            loadFailed = true
+        }
+    }
+}
+
+private struct RecommendedShopDetailView: View {
+    let shop: RecommendedShop
+
+    var body: some View {
+        List {
+            Section {
+                ShopPhoto(path: shop.imageURL, symbol: shop.symbol)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            }
+
+            Section("店铺信息") {
+                detailRow("名称", shop.name)
+                detailRow("分类", shop.category)
+                detailRow("可信分", shop.trustScore)
+                detailRow("评分", shop.rating)
+                detailRow("评价", shop.reviews)
+            }
+
+            Section("服务与位置") {
+                detailRow("服务", shop.service)
+                detailRow("详情", shop.details)
+                detailRow("地址", shop.address)
+                detailRow("距离", shop.distance)
+                detailRow("电话", shop.phone)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(shop.name)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func detailRow(_ title: String, _ value: String) -> some View {
+        LabeledContent(title) {
+            Text(value.isEmpty ? "暂无" : value)
+                .foregroundStyle(ProfilePalette.secondaryLabel)
+                .multilineTextAlignment(.trailing)
+        }
     }
 }
 
@@ -632,46 +942,40 @@ private struct NearbyDiscoveryView: View {
 
 private struct StreetVerifyTaskView: View {
     @State private var isShowingCapture = false
-    @State private var selectedStatus: StreetRecordStatus = .pending
+    @State private var selectedStatus: StreetRecordStatus = .history
+    @State private var isReloading = false
+    @State private var hasLoadedRecords = false
+    @State private var reviewRecords: [StreetReviewRecord] = []
+    @State private var loadErrorMessage: String?
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(keyPath: \ShopRecord.timestamp, ascending: false)],
         animation: .default
     )
     private var records: FetchedResults<ShopRecord>
 
-    private var pendingRecords: [ShopRecord] {
-        Array(records)
-    }
-
-    private var approvedRecords: [ShopRecord] {
-        []
-    }
-
-    private var rejectedRecords: [ShopRecord] {
-        []
-    }
-
-    private var selectedRecords: [ShopRecord] {
+    private var selectedRecords: [StreetReviewRecord] {
         switch selectedStatus {
+        case .history:
+            return reviewRecords
         case .pending:
-            return pendingRecords
+            return reviewRecords.filter { $0.reviewState == .pending }
         case .approved:
-            return approvedRecords
+            return reviewRecords.filter { $0.reviewState == .approved }
         case .rejected:
-            return rejectedRecords
+            return reviewRecords.filter { $0.reviewState == .rejected }
         }
     }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                DesignTokens.background.ignoresSafeArea()
+            ZStack(alignment: .top) {
+                ProfilePalette.groupedBackground.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("扫街")
-                            .font(.largeTitle.weight(.black))
-                            .foregroundStyle(DesignTokens.ink)
+                            .font(.system(size: 34, weight: .bold))
+                            .foregroundStyle(ProfilePalette.label)
 
                         Picker("记录状态", selection: $selectedStatus) {
                             ForEach(StreetRecordStatus.allCases) { status in
@@ -679,31 +983,51 @@ private struct StreetVerifyTaskView: View {
                             }
                         }
                         .pickerStyle(.segmented)
+
+                        if let loadErrorMessage {
+                            Text(loadErrorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(ProfilePalette.secondaryLabel)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(ProfilePalette.surface)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 18)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
 
                     ScrollView(showsIndicators: false) {
                         StreetRecordList(status: selectedStatus, records: selectedRecords)
-                            .padding(.horizontal, 18)
+                            .padding(.horizontal, 16)
                             .padding(.top, 4)
                             .padding(.bottom, 96)
                     }
+                    .refreshable {
+                        await reloadStreetRecords()
+                    }
+                }
+
+                if isReloading {
+                    TopReloadIndicator()
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+            .animation(.easeInOut(duration: 0.2), value: isReloading)
             .safeAreaInset(edge: .bottom) {
                 Button {
                     isShowingCapture = true
                 } label: {
                     Label("开始扫街录入", systemImage: "camera.fill")
-                        .font(.headline.weight(.bold))
+                        .font(.headline.weight(.semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(DesignTokens.emerald)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .frame(height: 50)
+                        .background(ProfilePalette.systemBlue)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .padding(.horizontal, 18)
+                .padding(.horizontal, 16)
                 .padding(.top, 10)
                 .padding(.bottom, 8)
                 .background(.regularMaterial)
@@ -725,17 +1049,72 @@ private struct StreetVerifyTaskView: View {
                     .padding(.top, 18)
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .streetTabDoubleTapped)) { _ in
+                Task {
+                    await reloadStreetRecords()
+                }
+            }
+            .task {
+                guard !hasLoadedRecords else { return }
+                hasLoadedRecords = true
+                await reloadStreetRecords()
+            }
         }
+    }
+
+    @MainActor
+    private func reloadStreetRecords() async {
+        guard !isReloading else { return }
+
+        isReloading = true
+        defer { isReloading = false }
+
+        let localRecords = Array(records).map(localReviewRecord)
+
+        do {
+            let serverRecords = try await ShopFeedAPIClient.fetchStreetRecords()
+            var recordsByClientUUID: [String: StreetReviewRecord] = [:]
+            for record in serverRecords where !record.clientUUID.isEmpty {
+                recordsByClientUUID[record.clientUUID.lowercased()] = record
+            }
+
+            reviewRecords = localRecords.map { localRecord in
+                recordsByClientUUID[localRecord.clientUUID.lowercased()] ?? localRecord
+            }
+            loadErrorMessage = nil
+        } catch {
+            reviewRecords = localRecords
+            loadErrorMessage = "接口加载失败，当前显示本机待审核记录"
+        }
+    }
+
+    private func localReviewRecord(_ record: ShopRecord) -> StreetReviewRecord {
+        let clientUUID = record.id?.uuidString ?? ""
+        return StreetReviewRecord(
+            id: clientUUID.isEmpty ? record.objectID.uriRepresentation().absoluteString : clientUUID,
+            clientUUID: clientUUID,
+            shopName: record.shopName ?? "",
+            serviceContent: record.serviceContent ?? "",
+            phoneNumber: record.phoneNumber ?? "",
+            fullText: record.fullText ?? "",
+            imageURL: record.imagePath ?? "",
+            latitude: record.latitude,
+            longitude: record.longitude,
+            capturedAt: record.timestamp,
+            reviewState: .pending
+        )
     }
 
     private func count(for status: StreetRecordStatus) -> Int {
         switch status {
+        case .history:
+            return reviewRecords.count
         case .pending:
-            return pendingRecords.count
+            return reviewRecords.filter { $0.reviewState == .pending }.count
         case .approved:
-            return approvedRecords.count
+            return reviewRecords.filter { $0.reviewState == .approved }.count
         case .rejected:
-            return rejectedRecords.count
+            return reviewRecords.filter { $0.reviewState == .rejected }.count
         }
     }
 }
@@ -754,9 +1133,6 @@ private struct MessageCenterView: View {
 
 private struct ProfileCenterView: View {
     @EnvironmentObject private var authSession: AuthSession
-    @State private var statusMessage: String?
-    @State private var isWorking = false
-    @State private var isShowingAccountDetails = false
 
     var body: some View {
         NavigationStack {
@@ -769,24 +1145,12 @@ private struct ProfileCenterView: View {
 
                         if let account = authSession.account {
                             balanceOverview(account)
-                            accountActions(account)
-                            logoutButton
                         } else {
                             ProgressView("正在加载账户")
                                 .font(.subheadline)
                                 .foregroundStyle(ProfilePalette.secondaryLabel)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 36)
-                        }
-
-                        if let statusMessage {
-                            Text(statusMessage)
-                                .font(.footnote)
-                                .foregroundStyle(ProfilePalette.secondaryLabel)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(14)
-                                .background(ProfilePalette.surface)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                     }
                     .padding(.horizontal, 16)
@@ -806,7 +1170,6 @@ private struct ProfileCenterView: View {
 
     private func refreshAccount() async {
         await authSession.refreshAccount()
-        statusMessage = nil
     }
 
     private var header: some View {
@@ -869,15 +1232,15 @@ private struct ProfileCenterView: View {
                 .frame(height: 0.5)
 
             HStack(spacing: 0) {
-                ProfileMetric(title: "名称", value: account.profile.displayName)
+                ProfileMetric(title: "历史总收入", value: incomeText(account.totalIncome))
 
                 ProfileMetricDivider()
 
-                ProfileMetric(title: "账号", value: account.profile.accountLine)
+                ProfileMetric(title: "本月收入", value: incomeText(account.currentMonthIncome))
 
                 ProfileMetricDivider()
 
-                ProfileMetric(title: "身份", value: account.profile.roleName)
+                ProfileMetric(title: "上月收入", value: incomeText(account.lastMonthIncome))
             }
             .padding(.vertical, 14)
         }
@@ -885,101 +1248,8 @@ private struct ProfileCenterView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private func accountActions(_ account: UserAccountSummary) -> some View {
-        VStack(spacing: 0) {
-            ProfileActionRow(
-                title: "登录状态",
-                value: "已登录",
-                symbol: "checkmark.circle.fill",
-                tint: ProfilePalette.systemGreen,
-                showsChevron: false
-            )
-
-            ProfileRowDivider()
-
-            NavigationLink {
-                ProfileSettingsView()
-            } label: {
-                ProfileActionRow(
-                    title: "收款支付宝",
-                    value: account.alipayAccount.isEmpty ? "未绑定" : "已绑定",
-                    symbol: "creditcard.fill",
-                    tint: ProfilePalette.systemOrange
-                )
-            }
-            .buttonStyle(.plain)
-
-            ProfileRowDivider()
-
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isShowingAccountDetails.toggle()
-                }
-            } label: {
-                ProfileActionRow(
-                    title: "账号信息",
-                    value: isShowingAccountDetails ? "收起" : nil,
-                    symbol: "person.text.rectangle.fill",
-                    tint: ProfilePalette.systemBlue,
-                    chevronDirection: isShowingAccountDetails ? "chevron.up" : "chevron.down"
-                )
-            }
-            .buttonStyle(.plain)
-
-            if isShowingAccountDetails {
-                ProfileRowDivider()
-
-                VStack(spacing: 0) {
-                    ProfileDetailRow(title: "名称", value: account.profile.displayName)
-                    ProfileDetailRow(title: "账号", value: account.profile.accountLine)
-                    ProfileDetailRow(title: "身份", value: account.profile.roleName)
-                    ProfileDetailRow(title: "状态", value: account.profile.syncStatus)
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            ProfileRowDivider()
-
-            NavigationLink {
-                ProfileSettingsView()
-            } label: {
-                ProfileActionRow(
-                    title: "设置",
-                    value: nil,
-                    symbol: "gearshape.fill",
-                    tint: ProfilePalette.systemGray
-                )
-            }
-            .buttonStyle(.plain)
-        }
-        .background(ProfilePalette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-
-    private var logoutButton: some View {
-        Button(role: .destructive) {
-            Task {
-                await logout()
-            }
-        } label: {
-            Text("退出登录")
-                .font(.body)
-                .foregroundStyle(ProfilePalette.systemRed)
-                .frame(maxWidth: .infinity)
-                .frame(height: 50)
-                .background(ProfilePalette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .disabled(isWorking)
-        .opacity(isWorking ? 0.55 : 1)
-    }
-
-    private func logout() async {
-        isWorking = true
-        defer { isWorking = false }
-
-        await authSession.logout()
-        statusMessage = nil
+    private func incomeText(_ amount: Double) -> String {
+        String(format: "%.2f", amount)
     }
 }
 
@@ -1017,8 +1287,6 @@ private struct ProfileActionRow: View {
     let value: String?
     let symbol: String
     let tint: Color
-    var showsChevron = true
-    var chevronDirection = "chevron.right"
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1042,37 +1310,13 @@ private struct ProfileActionRow: View {
                     .lineLimit(1)
             }
 
-            if showsChevron {
-                Image(systemName: chevronDirection)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(ProfilePalette.tertiaryLabel)
-            }
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ProfilePalette.tertiaryLabel)
         }
         .padding(.horizontal, 14)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
-    }
-}
-
-private struct ProfileDetailRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title)
-                .font(.footnote)
-                .foregroundStyle(ProfilePalette.secondaryLabel)
-                .frame(width: 44, alignment: .leading)
-
-            Text(value)
-                .font(.footnote)
-                .foregroundStyle(ProfilePalette.label)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .multilineTextAlignment(.trailing)
-        }
-        .padding(.horizontal, 56)
-        .padding(.vertical, 8)
     }
 }
 
@@ -1094,29 +1338,35 @@ private struct ProfileSettingsView: View {
 
     var body: some View {
         ZStack {
-            DesignTokens.background.ignoresSafeArea()
+            ProfilePalette.groupedBackground.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 20) {
                     Text("设置")
-                        .font(.system(size: 34, weight: .black, design: .rounded))
-                        .foregroundStyle(DesignTokens.ink)
+                        .font(.system(size: 34, weight: .bold))
+                        .foregroundStyle(ProfilePalette.label)
+
+                    if let account = authSession.account {
+                        settingsMenu(account)
+                    }
 
                     alipayCard
 
                     if let statusMessage {
                         Text(statusMessage)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(DesignTokens.secondaryText)
+                            .font(.footnote)
+                            .foregroundStyle(ProfilePalette.secondaryLabel)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(14)
-                            .background(.white.opacity(0.72))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .background(ProfilePalette.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
+
+                    logoutButton
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 18)
-                .padding(.bottom, 28)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
         }
         .navigationTitle("")
@@ -1127,11 +1377,78 @@ private struct ProfileSettingsView: View {
         }
     }
 
+    private func settingsMenu(_ account: UserAccountSummary) -> some View {
+        VStack(spacing: 0) {
+            NavigationLink {
+                ProfileInformationView(
+                    title: "个人信息",
+                    items: [
+                        ProfileInformationItem(title: "名称", value: account.profile.displayName),
+                        ProfileInformationItem(title: "身份", value: account.profile.roleName),
+                        ProfileInformationItem(title: "所属站点", value: account.profile.locationName)
+                    ]
+                )
+            } label: {
+                ProfileActionRow(
+                    title: "个人信息",
+                    value: nil,
+                    symbol: "person.fill",
+                    tint: ProfilePalette.systemBlue
+                )
+            }
+            .buttonStyle(.plain)
+
+            ProfileRowDivider()
+
+            NavigationLink {
+                WithdrawalHistoryView()
+            } label: {
+                ProfileActionRow(
+                    title: "提现明细",
+                    value: nil,
+                    symbol: "list.bullet.rectangle.fill",
+                    tint: ProfilePalette.systemGreen
+                )
+            }
+            .buttonStyle(.plain)
+
+            ProfileRowDivider()
+
+            NavigationLink {
+                ProfileInformationView(
+                    title: "账号信息",
+                    items: [
+                        ProfileInformationItem(title: "账号", value: account.profile.accountLine),
+                        ProfileInformationItem(
+                            title: "收款支付宝",
+                            value: account.alipayAccount.isEmpty ? "未绑定" : account.alipayAccount
+                        ),
+                        ProfileInformationItem(
+                            title: "收款姓名",
+                            value: account.alipayName.isEmpty ? "未设置" : account.alipayName
+                        ),
+                        ProfileInformationItem(title: "同步状态", value: account.profile.syncStatus)
+                    ]
+                )
+            } label: {
+                ProfileActionRow(
+                    title: "账号信息",
+                    value: nil,
+                    symbol: "person.text.rectangle.fill",
+                    tint: ProfilePalette.systemOrange
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .background(ProfilePalette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private var alipayCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("收款支付宝")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(DesignTokens.ink)
+                .font(.headline)
+                .foregroundStyle(ProfilePalette.label)
 
             TextField("支付宝账号", text: $alipayAccount)
                 .textInputAutocapitalization(.never)
@@ -1147,16 +1464,36 @@ private struct ProfileSettingsView: View {
                 }
             } label: {
                 Text(isWorking ? "保存中..." : "保存支付宝")
-                    .font(.headline.weight(.semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 13)
-                    .background(DesignTokens.ink)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .frame(height: 44)
+                    .background(ProfilePalette.systemBlue)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .disabled(isWorking || alipayAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || alipayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .profilePanelStyle()
+        .padding(16)
+        .background(ProfilePalette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var logoutButton: some View {
+        Button(role: .destructive) {
+            Task {
+                await logout()
+            }
+        } label: {
+            Text("退出登录")
+                .font(.body)
+                .foregroundStyle(ProfilePalette.systemRed)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(ProfilePalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .disabled(isWorking)
+        .opacity(isWorking ? 0.55 : 1)
     }
 
     private func saveAlipay() async {
@@ -1175,6 +1512,60 @@ private struct ProfileSettingsView: View {
         } catch {
             statusMessage = "支付宝保存失败"
         }
+    }
+
+    private func logout() async {
+        isWorking = true
+        defer { isWorking = false }
+
+        await authSession.logout()
+        statusMessage = nil
+    }
+}
+
+private struct ProfileInformationItem: Identifiable {
+    let title: String
+    let value: String
+
+    var id: String { title }
+}
+
+private struct ProfileInformationView: View {
+    let title: String
+    let items: [ProfileInformationItem]
+
+    var body: some View {
+        List(items) { item in
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(item.title)
+                    .foregroundStyle(ProfilePalette.label)
+
+                Spacer(minLength: 16)
+
+                Text(item.value)
+                    .foregroundStyle(ProfilePalette.secondaryLabel)
+                    .multilineTextAlignment(.trailing)
+            }
+            .font(.body)
+            .padding(.vertical, 4)
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct WithdrawalHistoryView: View {
+    var body: some View {
+        ContentUnavailableView(
+            "暂无提现明细",
+            systemImage: "list.bullet.rectangle",
+            description: Text("提交提现申请后，可在这里查看处理记录")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ProfilePalette.groupedBackground)
+        .navigationTitle("提现明细")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -1516,7 +1907,7 @@ private struct StaticFeaturePage: View {
 
 private struct StreetRecordList: View {
     let status: StreetRecordStatus
-    let records: [ShopRecord]
+    let records: [StreetReviewRecord]
 
     var body: some View {
         StreetRecordStatusList(status: status, records: records)
@@ -1524,6 +1915,7 @@ private struct StreetRecordList: View {
 }
 
 private enum StreetRecordStatus: String, CaseIterable, Identifiable {
+    case history
     case pending
     case approved
     case rejected
@@ -1532,6 +1924,8 @@ private enum StreetRecordStatus: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .history:
+            return "历史"
         case .pending:
             return "待审核"
         case .approved:
@@ -1540,79 +1934,76 @@ private enum StreetRecordStatus: String, CaseIterable, Identifiable {
             return "未通过"
         }
     }
-
-    var color: Color {
-        switch self {
-        case .pending:
-            return .orange
-        case .approved:
-            return DesignTokens.emerald
-        case .rejected:
-            return .red
-        }
-    }
 }
 
 private struct StreetRecordStatusList: View {
     let status: StreetRecordStatus
-    let records: [ShopRecord]
+    let records: [StreetReviewRecord]
 
     var body: some View {
-        VStack(spacing: 12) {
+        Group {
             if records.isEmpty {
-                Text("暂无\(status.title)记录")
-                    .font(.caption)
-                    .foregroundStyle(DesignTokens.secondaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(.white.opacity(0.72))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                ContentUnavailableView(
+                    "暂无\(status.title)记录",
+                    systemImage: "tray",
+                    description: Text("双击底部“扫街”可重新加载")
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 28)
+                .background(ProfilePalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else {
-                VStack(spacing: 12) {
-                    ForEach(records) { record in
+                VStack(spacing: 0) {
+                    ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
                         NavigationLink {
-                            RecordDetailView(record: record)
+                            StreetReviewRecordDetailView(record: record)
                         } label: {
-                            StreetRecordCard(record: record, statusTitle: status.title, statusColor: status.color)
+                            StreetRecordRow(record: record)
                         }
                         .buttonStyle(.plain)
+
+                        if index < records.count - 1 {
+                            ProfileRowDivider()
+                        }
                     }
                 }
+                .background(ProfilePalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
     }
 }
 
-private struct StreetRecordCard: View {
-    @ObservedObject var record: ShopRecord
-    let statusTitle: String
-    let statusColor: Color
+private struct StreetRecordRow: View {
+    let record: StreetReviewRecord
 
     var body: some View {
         HStack(spacing: 12) {
-            RecordThumbnail(path: record.imagePath)
+            ShopPhoto(path: record.imageURL, symbol: "storefront.fill")
+                .frame(width: 56, height: 56)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(title)
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(DesignTokens.ink)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(ProfilePalette.label)
                         .lineLimit(1)
 
                     Spacer()
 
-                    Text(statusTitle)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(statusColor)
+                    Text(record.reviewState.title)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(record.reviewState.color)
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(statusColor.opacity(0.12))
+                        .padding(.vertical, 4)
+                        .background(record.reviewState.color.opacity(0.12))
                         .clipShape(Capsule())
                 }
 
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(DesignTokens.secondaryText)
+                    .foregroundStyle(ProfilePalette.secondaryLabel)
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
@@ -1620,42 +2011,37 @@ private struct StreetRecordCard: View {
                     Label(locationText, systemImage: "location.fill")
                     Spacer()
                 }
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(DesignTokens.secondaryText)
+                .font(.caption2)
+                .foregroundStyle(ProfilePalette.secondaryLabel)
 
-                if let timestamp = record.timestamp {
+                if let timestamp = record.capturedAt {
                     Text(ShopDateFormatter.dateTime(timestamp))
                         .font(.caption2)
-                        .foregroundStyle(DesignTokens.secondaryText)
+                        .foregroundStyle(ProfilePalette.secondaryLabel)
                 }
             }
 
             Image(systemName: "chevron.right")
-                .font(.caption.weight(.black))
-                .foregroundStyle(DesignTokens.secondaryText)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ProfilePalette.tertiaryLabel)
         }
         .padding(14)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(DesignTokens.line, lineWidth: 1)
-        )
+        .contentShape(Rectangle())
     }
 
     private var title: String {
-        if let shopName = record.shopName, !shopName.isEmpty {
-            return shopName
+        if !record.shopName.isEmpty {
+            return record.shopName
         }
-        return record.phoneNumber?.isEmpty == false ? record.phoneNumber ?? "未命名店铺" : "未命名店铺"
+        return record.phoneNumber.isEmpty ? "未命名店铺" : record.phoneNumber
     }
 
     private var subtitle: String {
-        if let serviceContent = record.serviceContent, !serviceContent.isEmpty {
-            return serviceContent
+        if !record.serviceContent.isEmpty {
+            return record.serviceContent
         }
 
-        let text = record.fullText?.replacingOccurrences(of: "\n", with: " ") ?? ""
+        let text = record.fullText.replacingOccurrences(of: "\n", with: " ")
         if text.isEmpty {
             return "服务内容待完善"
         }
@@ -1663,7 +2049,7 @@ private struct StreetRecordCard: View {
     }
 
     private var phoneText: String {
-        record.phoneNumber?.isEmpty == false ? record.phoneNumber ?? "无号码" : "无号码"
+        record.phoneNumber.isEmpty ? "无号码" : record.phoneNumber
     }
 
     private var locationText: String {
@@ -1671,6 +2057,79 @@ private struct StreetRecordCard: View {
             return "未定位"
         }
         return "已记录位置"
+    }
+}
+
+private extension StreetReviewState {
+    var color: Color {
+        switch self {
+        case .pending:
+            return ProfilePalette.systemOrange
+        case .approved:
+            return ProfilePalette.systemGreen
+        case .rejected:
+            return ProfilePalette.systemRed
+        }
+    }
+}
+
+private struct StreetReviewRecordDetailView: View {
+    let record: StreetReviewRecord
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 16) {
+                ShopPhoto(path: record.imageURL, symbol: "storefront.fill")
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 230)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(spacing: 0) {
+                    detailRow("审核状态", record.reviewState.title, valueColor: record.reviewState.color)
+                    ProfileRowDivider()
+                    detailRow("名称", record.shopName.isEmpty ? "未整理出名称" : record.shopName)
+                    ProfileRowDivider()
+                    detailRow("服务内容", record.serviceContent.isEmpty ? "未整理出服务内容" : record.serviceContent)
+                    ProfileRowDivider()
+                    detailRow("电话", record.phoneNumber.isEmpty ? "无号码" : record.phoneNumber)
+                    ProfileRowDivider()
+                    detailRow("位置", locationText)
+
+                    if let capturedAt = record.capturedAt {
+                        ProfileRowDivider()
+                        detailRow("采集时间", ShopDateFormatter.dateTime(capturedAt))
+                    }
+                }
+                .background(ProfilePalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .padding(16)
+        }
+        .background(ProfilePalette.groupedBackground)
+        .navigationTitle("扫街详情")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func detailRow(_ title: String, _ value: String, valueColor: Color = ProfilePalette.secondaryLabel) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(title)
+                .foregroundStyle(ProfilePalette.label)
+
+            Spacer(minLength: 16)
+
+            Text(value)
+                .foregroundStyle(valueColor)
+                .multilineTextAlignment(.trailing)
+        }
+        .font(.subheadline)
+        .padding(14)
+    }
+
+    private var locationText: String {
+        if record.latitude == 0 && record.longitude == 0 {
+            return "未定位"
+        }
+        return String(format: "%.6f, %.6f", record.latitude, record.longitude)
     }
 }
 
@@ -1717,7 +2176,6 @@ private enum ProfilePalette {
     static let systemGreen = Color(uiColor: .systemGreen)
     static let systemOrange = Color(uiColor: .systemOrange)
     static let systemRed = Color(uiColor: .systemRed)
-    static let systemGray = Color(uiColor: .systemGray)
 }
 
 private enum DesignTokens {
