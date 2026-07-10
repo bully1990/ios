@@ -26,7 +26,7 @@ enum ShopFeedAPIClient {
         page: Int,
         pageSize: Int
     ) async throws -> PagedResult<FeedShop> {
-        let records = try await fetchRecords(page: page, pageSize: pageSize)
+        let records = try await fetchRecords(page: page, pageSize: pageSize, auditStatus: "1")
         let approvedRecords = filtered(records, keyword: keyword).filter { $0.isApproved }
         let shops = makeFeedShops(
             records: approvedRecords,
@@ -65,8 +65,16 @@ enum ShopFeedAPIClient {
         return makeFeedShops(records: records, latitude: latitude, longitude: longitude, limit: 30)
     }
 
-    static func fetchStreetRecords(page: Int, pageSize: Int) async throws -> PagedResult<StreetReviewRecord> {
-        let records = try await fetchRecords(page: page, pageSize: pageSize)
+    static func fetchStreetRecords(
+        reviewState: StreetReviewState,
+        page: Int,
+        pageSize: Int
+    ) async throws -> PagedResult<StreetReviewRecord> {
+        let records = try await fetchRecords(
+            page: page,
+            pageSize: pageSize,
+            auditStatus: reviewState.apiValue
+        )
         let items = records
             .map(\.streetReviewRecord)
             .sorted { lhs, rhs in
@@ -78,8 +86,12 @@ enum ShopFeedAPIClient {
         return PagedResult(items: items, page: page, hasMore: records.count == pageSize)
     }
 
-    private static func fetchRecords(page: Int = 1, pageSize: Int = 100) async throws -> [ShopCaptureRecord] {
-        var request = URLRequest(url: recordsURL(page: page, pageSize: pageSize))
+    private static func fetchRecords(
+        page: Int = 1,
+        pageSize: Int = 100,
+        auditStatus: String? = nil
+    ) async throws -> [ShopCaptureRecord] {
+        var request = URLRequest(url: recordsURL(page: page, pageSize: pageSize, auditStatus: auditStatus))
         request.httpMethod = "GET"
         request.timeoutInterval = 20
         request.httpShouldHandleCookies = true
@@ -98,7 +110,7 @@ enum ShopFeedAPIClient {
         return envelope.data
     }
 
-    static func recordsURL(page: Int, pageSize: Int) -> URL {
+    static func recordsURL(page: Int, pageSize: Int, auditStatus: String? = nil) -> URL {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "m", value: "content"),
@@ -107,6 +119,9 @@ enum ShopFeedAPIClient {
             URLQueryItem(name: "page", value: "\(max(1, page))"),
             URLQueryItem(name: "pagesize", value: "\(max(1, pageSize))")
         ]
+        if let auditStatus {
+            components.queryItems?.append(URLQueryItem(name: "audit_status", value: auditStatus))
+        }
         return components.url!
     }
 
@@ -499,6 +514,17 @@ enum StreetReviewState: String, CaseIterable, Sendable {
             return "已通过"
         case .rejected:
             return "未通过"
+        }
+    }
+
+    var apiValue: String {
+        switch self {
+        case .pending:
+            return "0"
+        case .approved:
+            return "1"
+        case .rejected:
+            return "2"
         }
     }
 }

@@ -82,110 +82,215 @@ final class AuthSession: ObservableObject {
 private struct LaunchCheckingView: View {
     var body: some View {
         ZStack {
-            Color(red: 0.94, green: 0.96, blue: 0.93)
+            Color(uiColor: .systemGroupedBackground)
                 .ignoresSafeArea()
 
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 ProgressView()
-                    .tint(Color(red: 0.05, green: 0.42, blue: 0.33))
+                    .tint(Color(uiColor: .systemBlue))
                 Text("正在检查登录状态")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(Color(red: 0.06, green: 0.12, blue: 0.11))
+                    .font(.subheadline)
+                    .foregroundStyle(Color(uiColor: .secondaryLabel))
             }
-            .padding(24)
-            .background(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
     }
 }
 
 private struct AppLoginView: View {
-    private enum Mode {
+    private enum Mode: Hashable {
         case login
         case register
     }
 
+    private enum LoginField: Hashable {
+        case username
+        case password
+    }
+
     @EnvironmentObject private var authSession: AuthSession
     @State private var mode: Mode = .login
-    @State private var username = "demo"
-    @State private var password = "123456"
+    @State private var username = ""
+    @State private var password = ""
     @State private var message: String?
     @State private var isWorking = false
+    @State private var isPasswordVisible = false
+    @FocusState private var focusedField: LoginField?
     private let siteID = 999
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.90, green: 0.95, blue: 0.91),
-                    Color(red: 0.99, green: 0.96, blue: 0.88)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color(uiColor: .systemGroupedBackground)
+                .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(mode == .login ? "登录" : "注册")
-                        .font(.system(size: 38, weight: .black, design: .rounded))
-                        .foregroundStyle(Color(red: 0.05, green: 0.12, blue: 0.10))
-                }
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 28) {
+                    brandHeader
 
-                VStack(spacing: 14) {
-                    TextField("用户名", text: $username)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .textContentType(.username)
-                        .loginFieldStyle()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(mode == .login ? "欢迎回来" : "创建账号")
+                            .font(.system(size: 34, weight: .bold))
+                            .foregroundStyle(Color(uiColor: .label))
 
-                    SecureField("密码", text: $password)
-                        .textContentType(.password)
-                        .loginFieldStyle()
-                }
-
-                Button {
-                    Task {
-                        await submit()
+                        Text(mode == .login ? "登录后同步采集记录与审核进度" : "注册后开始采集真实店铺信息")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(uiColor: .secondaryLabel))
                     }
-                } label: {
-                    Text(isWorking ? "处理中..." : (mode == .login ? "登录进入" : "注册进入"))
-                        .font(.headline.weight(.bold))
+
+                    Picker("账号操作", selection: $mode) {
+                        Text("登录").tag(Mode.login)
+                        Text("注册").tag(Mode.register)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: mode) { _, _ in
+                        resetFormForModeChange()
+                    }
+
+                    VStack(spacing: 0) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.fill")
+                                .loginFieldIconStyle()
+
+                            TextField("请输入账号", text: $username)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .textContentType(.username)
+                                .submitLabel(.next)
+                                .focused($focusedField, equals: .username)
+                                .onSubmit {
+                                    focusedField = .password
+                                }
+                        }
+                        .loginFieldRowStyle()
+
+                        Divider()
+                            .padding(.leading, 52)
+
+                        HStack(spacing: 12) {
+                            Image(systemName: "lock.fill")
+                                .loginFieldIconStyle()
+
+                            passwordField
+
+                            Button {
+                                isPasswordVisible.toggle()
+                            } label: {
+                                Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                                    .font(.body)
+                                    .foregroundStyle(Color(uiColor: .secondaryLabel))
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(isPasswordVisible ? "隐藏密码" : "显示密码")
+                        }
+                        .loginFieldRowStyle()
+                    }
+                    .background(Color(uiColor: .secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color(uiColor: .separator).opacity(0.45), lineWidth: 0.5)
+                    )
+
+                    if let message {
+                        Label(message, systemImage: "exclamationmark.circle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(Color(uiColor: .systemRed))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Button {
+                        focusedField = nil
+                        Task {
+                            await submit()
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isWorking {
+                                ProgressView()
+                                    .tint(.white)
+                            }
+
+                            Text(isWorking ? "处理中" : (mode == .login ? "登录" : "注册"))
+                        }
+                        .font(.headline.weight(.semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
-                        .background(Color(red: 0.05, green: 0.42, blue: 0.33))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                .disabled(isWorking || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
+                        .frame(height: 50)
+                        .background(canSubmit ? Color(uiColor: .systemBlue) : Color(uiColor: .systemGray3))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .disabled(!canSubmit)
 
-                Button {
-                    switchMode()
-                } label: {
-                    Text(mode == .login ? "还没有账号？立即注册" : "已有账号？返回登录")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color(red: 0.05, green: 0.42, blue: 0.33))
-                        .frame(maxWidth: .infinity)
-                }
-                .disabled(isWorking)
+                    Button {
+                        switchMode()
+                    } label: {
+                        Text(mode == .login ? "还没有账号？创建账号" : "已有账号？返回登录")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(uiColor: .systemBlue))
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isWorking)
 
-                if let message {
-                    Text(message)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Spacer(minLength: 20)
                 }
+                .padding(.horizontal, 24)
+                .padding(.top, 28)
+                .padding(.bottom, 36)
             }
-            .padding(22)
-            .background(.white.opacity(0.92))
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(.white.opacity(0.72), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.12), radius: 28, y: 12)
-            .padding(.horizontal, 22)
+            .scrollDismissesKeyboard(.interactively)
         }
+        .animation(.easeInOut(duration: 0.2), value: mode)
+    }
+
+    private var brandHeader: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "camera.viewfinder")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(Color(uiColor: .systemBlue))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("扫街采集")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(Color(uiColor: .label))
+
+                Text("专业采集端")
+                    .font(.caption)
+                    .foregroundStyle(Color(uiColor: .secondaryLabel))
+            }
+
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var passwordField: some View {
+        Group {
+            if isPasswordVisible {
+                TextField("请输入密码", text: $password)
+            } else {
+                SecureField("请输入密码", text: $password)
+            }
+        }
+        .textContentType(mode == .login ? .password : .newPassword)
+        .submitLabel(.go)
+        .focused($focusedField, equals: .password)
+        .onSubmit {
+            guard canSubmit else { return }
+            Task {
+                await submit()
+            }
+        }
+    }
+
+    private var canSubmit: Bool {
+        !isWorking
+            && !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !password.isEmpty
     }
 
     private func submit() async {
@@ -215,27 +320,29 @@ private struct AppLoginView: View {
 
     private func switchMode() {
         mode = mode == .login ? .register : .login
+    }
+
+    private func resetFormForModeChange() {
         message = nil
-        if mode == .login {
-            username = "demo"
-            password = "123456"
-        } else {
-            username = ""
-            password = ""
-        }
+        username = ""
+        password = ""
+        isPasswordVisible = false
+        focusedField = nil
     }
 }
 
 private extension View {
-    func loginFieldStyle() -> some View {
+    func loginFieldRowStyle() -> some View {
         self
-            .padding(.horizontal, 14)
-            .frame(height: 52)
-            .background(Color(red: 0.96, green: 0.97, blue: 0.95))
-            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
-            )
+            .padding(.leading, 16)
+            .padding(.trailing, 8)
+            .frame(minHeight: 56)
+    }
+
+    func loginFieldIconStyle() -> some View {
+        self
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(Color(uiColor: .secondaryLabel))
+            .frame(width: 24)
     }
 }

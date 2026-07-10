@@ -139,9 +139,20 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(query["pagesize"], "20")
     }
 
+    func testStreetRecordURLIncludesSelectedReviewState() throws {
+        let url = ShopFeedAPIClient.recordsURL(page: 1, pageSize: 10, auditStatus: StreetReviewState.approved.apiValue)
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+
+        XCTAssertEqual(query["page"], "1")
+        XCTAssertEqual(query["pagesize"], "10")
+        XCTAssertEqual(query["audit_status"], "1")
+    }
+
     func testStreetReviewStatesContainOnlyVisibleSegments() {
         XCTAssertEqual(StreetReviewState.allCases, [.pending, .approved, .rejected])
         XCTAssertEqual(StreetReviewState.allCases.map(\.title), ["待审核", "已通过", "未通过"])
+        XCTAssertEqual(StreetReviewState.allCases.map(\.apiValue), ["0", "1", "2"])
     }
 
     func testCityOptionBuildsPinyinInitial() {

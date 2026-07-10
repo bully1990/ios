@@ -963,9 +963,14 @@ private struct AllRecommendedShopsView: View {
     @State private var isLoading = false
     @State private var loadFailed = false
     @State private var nextPage = 1
-    @State private var hasMorePages = true
+    @State private var hasMoreServerPages = true
+    @State private var bufferedFeedShops: [FeedShop] = []
 
-    private let pageSize = 20
+    private let pageSize = 10
+
+    private var hasMorePages: Bool {
+        hasMoreServerPages || !bufferedFeedShops.isEmpty
+    }
 
     var body: some View {
         Group {
@@ -1038,16 +1043,22 @@ private struct AllRecommendedShopsView: View {
 
         if reset {
             nextPage = 1
-            hasMorePages = true
+            hasMoreServerPages = true
+            bufferedFeedShops = []
             loadFailed = false
         }
 
         do {
             var page = nextPage
-            var accumulated: [FeedShop] = []
-            var pageHasMore = true
+            var accumulated = bufferedFeedShops
+            var pageHasMore = hasMoreServerPages
+            var seenIDs = Set(accumulated.map(\.id))
+            if !reset {
+                seenIDs.formUnion(shops.compactMap { Int($0.id) })
+            }
+            var scannedPages = 0
 
-            repeat {
+            while accumulated.count < pageSize, pageHasMore, scannedPages < 20 {
                 let result = try await ShopFeedAPIClient.fetchAllShops(
                     latitude: latitude,
                     longitude: longitude,
@@ -1055,12 +1066,20 @@ private struct AllRecommendedShopsView: View {
                     page: page,
                     pageSize: pageSize
                 )
-                accumulated.append(contentsOf: result.items)
+                let uniqueItems = result.items.filter { seenIDs.insert($0.id).inserted }
+                accumulated.append(contentsOf: uniqueItems)
                 pageHasMore = result.hasMore
+                if !result.items.isEmpty && uniqueItems.isEmpty {
+                    pageHasMore = false
+                }
                 page += 1
-            } while accumulated.isEmpty && pageHasMore
+                scannedPages += 1
+            }
 
-            let mapped = accumulated.enumerated().map { index, shop in
+            let batch = Array(accumulated.prefix(pageSize))
+            bufferedFeedShops = Array(accumulated.dropFirst(batch.count))
+
+            let mapped = batch.enumerated().map { index, shop in
                 let rank = (reset ? 0 : shops.count) + index + 1
                 return shop.withRank(rank).recommendedShop(fallbackRank: rank)
             }
@@ -1068,7 +1087,10 @@ private struct AllRecommendedShopsView: View {
             let newShops = mapped.filter { !existingIDs.contains($0.id) }
             shops = reset ? newShops : shops + newShops
             nextPage = page
-            hasMorePages = pageHasMore
+            hasMoreServerPages = pageHasMore
+            if newShops.isEmpty && bufferedFeedShops.isEmpty {
+                hasMoreServerPages = false
+            }
             loadFailed = false
         } catch {
             loadFailed = true
@@ -1342,16 +1364,27 @@ private struct NearbyDiscoveryView: View {
     }
 }
 
+private struct StreetPageState {
+    var records: [StreetReviewRecord] = []
+    var nextPage = 1
+    var hasMoreServerRecords = true
+    var hasMoreLocalRecords = false
+    var loadedServerKeys: Set<String> = []
+
+    var hasMore: Bool {
+        hasMoreServerRecords || hasMoreLocalRecords
+    }
+}
+
 private struct StreetVerifyTaskView: View {
     @State private var isShowingCapture = false
     @State private var selectedStatus: StreetRecordStatus = .pending
     @State private var isReloading = false
     @State private var hasLoadedRecords = false
-    @State private var reviewRecords: [StreetReviewRecord] = []
+    @State private var pageStates: [StreetRecordStatus: StreetPageState] = [:]
+    @State private var localPendingRecords: [StreetReviewRecord] = []
     @State private var loadErrorMessage: String?
-    @State private var isLoadingMore = false
-    @State private var nextPage = 1
-    @State private var hasMorePages = true
+    @State private var loadingStatus: StreetRecordStatus?
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(keyPath: \ShopRecord.timestamp, ascending: false)],
         animation: .default
@@ -1359,14 +1392,7 @@ private struct StreetVerifyTaskView: View {
     private var records: FetchedResults<ShopRecord>
 
     private var selectedRecords: [StreetReviewRecord] {
-        switch selectedStatus {
-        case .pending:
-            return reviewRecords.filter { $0.reviewState == .pending }
-        case .approved:
-            return reviewRecords.filter { $0.reviewState == .approved }
-        case .rejected:
-            return reviewRecords.filter { $0.reviewState == .rejected }
-        }
+        pageStates[selectedStatus]?.records ?? []
     }
 
     var body: some View {
@@ -1404,16 +1430,23 @@ private struct StreetVerifyTaskView: View {
                         VStack(spacing: 12) {
                             StreetRecordList(status: selectedStatus, records: selectedRecords)
 
-                            if hasMorePages {
-                                ProgressView(isLoadingMore ? "正在加载更多" : "")
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .id(nextPage)
-                                    .onAppear {
-                                        Task {
-                                            await loadNextStreetPage()
-                                        }
+                            if !isReloading, pageStates[selectedStatus]?.hasMore == true {
+                                ZStack {
+                                    Color.clear
+                                        .frame(height: 1)
+
+                                    if loadingStatus == selectedStatus {
+                                        ProgressView("正在加载更多")
                                     }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: loadingStatus == selectedStatus ? 44 : 1)
+                                .id("\(selectedStatus.rawValue)-\(pageStates[selectedStatus]?.nextPage ?? 1)")
+                                .onAppear {
+                                    Task {
+                                        await loadMoreRecords(for: selectedStatus)
+                                    }
+                                }
                             }
                         }
                         .padding(.horizontal, 16)
@@ -1481,48 +1514,108 @@ private struct StreetVerifyTaskView: View {
 
     @MainActor
     private func reloadStreetRecords() async {
-        guard !isReloading else { return }
+        guard !isReloading, loadingStatus == nil else { return }
 
         isReloading = true
         defer { isReloading = false }
 
-        nextPage = 1
-        hasMorePages = true
+        pageStates = [:]
+        localPendingRecords = Array(records).map(localReviewRecord)
         loadErrorMessage = nil
-        reviewRecords = Array(records).map(localReviewRecord)
-        await loadNextStreetPage()
+
+        for status in [StreetRecordStatus.approved, .rejected, .pending] {
+            await loadMoreRecords(for: status, minimumCount: 10)
+        }
     }
 
     @MainActor
-    private func loadNextStreetPage() async {
-        guard !isLoadingMore, hasMorePages else { return }
+    private func loadMoreRecords(for status: StreetRecordStatus, minimumCount: Int? = nil) async {
+        var state = pageStates[status] ?? StreetPageState()
+        guard loadingStatus == nil, state.hasMore else { return }
 
-        isLoadingMore = true
-        defer { isLoadingMore = false }
+        let targetCount = minimumCount ?? (state.records.count + 10)
+        loadingStatus = status
+        defer { loadingStatus = nil }
 
         do {
-            let result = try await ShopFeedAPIClient.fetchStreetRecords(page: nextPage, pageSize: 20)
-            mergeStreetRecords(result.items)
-            nextPage = result.page + 1
-            hasMorePages = result.hasMore
+            var scannedPages = 0
+
+            while state.records.count < targetCount,
+                  state.hasMoreServerRecords,
+                  scannedPages < 20 {
+                let result = try await ShopFeedAPIClient.fetchStreetRecords(
+                    reviewState: status.reviewState,
+                    page: state.nextPage,
+                    pageSize: 10
+                )
+                var loadedKeys = state.loadedServerKeys
+                let newSourceRecords = result.items.filter { record in
+                    loadedKeys.insert(streetRecordKey(record)).inserted
+                }
+                state.loadedServerKeys = loadedKeys
+                let newRecords = newSourceRecords.filter { $0.reviewState == status.reviewState }
+                state.records = mergeStreetRecords(state.records, with: newRecords)
+                state.nextPage = result.page + 1
+                state.hasMoreServerRecords = result.hasMore
+                if !result.items.isEmpty && newSourceRecords.isEmpty {
+                    state.hasMoreServerRecords = false
+                }
+                scannedPages += 1
+            }
+
+            if status == .pending, state.records.count < targetCount {
+                appendLocalPendingRecords(to: &state, targetCount: targetCount)
+            } else if status == .pending {
+                updateLocalPendingAvailability(in: &state)
+            }
+
+            pageStates[status] = state
             loadErrorMessage = nil
         } catch {
-            loadErrorMessage = nextPage == 1
+            if status == .pending {
+                appendLocalPendingRecords(to: &state, targetCount: targetCount)
+            }
+            pageStates[status] = state
+            loadErrorMessage = state.nextPage == 1
                 ? "接口加载失败，当前显示本机待审核记录"
                 : "更多记录加载失败，请稍后重试"
         }
     }
 
-    private func mergeStreetRecords(_ serverRecords: [StreetReviewRecord]) {
+    private func mergeStreetRecords(
+        _ existingRecords: [StreetReviewRecord],
+        with newRecords: [StreetReviewRecord]
+    ) -> [StreetReviewRecord] {
         var recordsByKey: [String: StreetReviewRecord] = [:]
-        for record in reviewRecords {
+        for record in existingRecords {
             recordsByKey[streetRecordKey(record)] = record
         }
-        for record in serverRecords {
+        for record in newRecords {
             recordsByKey[streetRecordKey(record)] = record
         }
-        reviewRecords = recordsByKey.values.sorted {
+        return recordsByKey.values.sorted {
             ($0.capturedAt ?? .distantPast) > ($1.capturedAt ?? .distantPast)
+        }
+    }
+
+    private func appendLocalPendingRecords(to state: inout StreetPageState, targetCount: Int) {
+        let serverKeys = Set(pageStates.values.flatMap { $0.loadedServerKeys }).union(state.loadedServerKeys)
+        let existingKeys = Set(state.records.map(streetRecordKey))
+        let availableRecords = localPendingRecords.filter { record in
+            let key = streetRecordKey(record)
+            return !serverKeys.contains(key) && !existingKeys.contains(key)
+        }
+        let neededCount = max(0, targetCount - state.records.count)
+        state.records = mergeStreetRecords(state.records, with: Array(availableRecords.prefix(neededCount)))
+        state.hasMoreLocalRecords = availableRecords.count > neededCount
+    }
+
+    private func updateLocalPendingAvailability(in state: inout StreetPageState) {
+        let serverKeys = Set(pageStates.values.flatMap { $0.loadedServerKeys }).union(state.loadedServerKeys)
+        let existingKeys = Set(state.records.map(streetRecordKey))
+        state.hasMoreLocalRecords = localPendingRecords.contains { record in
+            let key = streetRecordKey(record)
+            return !serverKeys.contains(key) && !existingKeys.contains(key)
         }
     }
 
@@ -1551,14 +1644,7 @@ private struct StreetVerifyTaskView: View {
     }
 
     private func count(for status: StreetRecordStatus) -> Int {
-        switch status {
-        case .pending:
-            return reviewRecords.filter { $0.reviewState == .pending }.count
-        case .approved:
-            return reviewRecords.filter { $0.reviewState == .approved }.count
-        case .rejected:
-            return reviewRecords.filter { $0.reviewState == .rejected }.count
-        }
+        pageStates[status]?.records.count ?? 0
     }
 }
 
@@ -2388,6 +2474,17 @@ private enum StreetRecordStatus: String, CaseIterable, Identifiable {
             return "已通过"
         case .rejected:
             return "未通过"
+        }
+    }
+
+    var reviewState: StreetReviewState {
+        switch self {
+        case .pending:
+            return .pending
+        case .approved:
+            return .approved
+        case .rejected:
+            return .rejected
         }
     }
 }
