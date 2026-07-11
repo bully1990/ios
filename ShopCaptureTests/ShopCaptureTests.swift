@@ -197,12 +197,12 @@ final class ShopCaptureTests: XCTestCase {
     }
 
     func testAdministrativeDivisionStoreBuildsThreeLevelSelection() throws {
-        let data = Data(#"<?xml version="1.0" encoding="utf-8"?><Location><State Name="河北" Code="13"><City Name="石家庄" Code="1"><Region Name="长安区" Code="2" /></City></State></Location>"#.utf8)
+        let data = Data(#"[{"c":13,"n":"河北省","ch":[{"c":"1301","n":"石家庄市","ch":[{"c":"130102","n":"长安区"}]}]}]"#.utf8)
         let store = try AdministrativeDivisionStore(data: data)
         let selection = try XCTUnwrap(store.selection(provinceName: "河北省", cityName: "石家庄市", districtName: "长安区"))
 
-        XCTAssertEqual(selection.0.name, "河北")
-        XCTAssertEqual(selection.1.name, "石家庄")
+        XCTAssertEqual(selection.0.name, "河北省")
+        XCTAssertEqual(selection.1.name, "石家庄市")
         XCTAssertEqual(selection.2.name, "长安区")
         XCTAssertNil(store.selection(
             provinceName: "河北省",
@@ -212,13 +212,13 @@ final class ShopCaptureTests: XCTestCase {
         ))
     }
 
-    func testAdministrativeDivisionStoreNormalizesMunicipality() throws {
-        let data = Data(#"<?xml version="1.0" encoding="utf-8"?><Location><State Name="北京" Code="11"><City Name="东城区" Code="1" /><City Name="西城区" Code="2" /></State></Location>"#.utf8)
+    func testAdministrativeDivisionStoreDecodesMunicipality() throws {
+        let data = Data(#"[{"c":11,"n":"北京市","ch":[{"c":"1101","n":"北京市","ch":[{"c":"110101","n":"东城区"},{"c":"110102","n":"西城区"}]}]}]"#.utf8)
         let store = try AdministrativeDivisionStore(data: data)
         let selection = try XCTUnwrap(store.selection(provinceName: "北京市", cityName: "北京市", districtName: "东城区"))
 
-        XCTAssertEqual(selection.0.name, "北京")
-        XCTAssertEqual(selection.1.name, "北京")
+        XCTAssertEqual(selection.0.name, "北京市")
+        XCTAssertEqual(selection.1.name, "北京市")
         XCTAssertEqual(selection.2.name, "东城区")
     }
 
