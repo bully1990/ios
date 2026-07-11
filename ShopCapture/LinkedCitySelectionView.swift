@@ -57,11 +57,17 @@ struct AdministrativeDivisionStore {
         return province.children
     }
 
-    func selection(provinceName: String?, cityName: String?, districtName: String?) -> (AdministrativeDivision, AdministrativeDivision, AdministrativeDivision)? {
+    func selection(
+        provinceName: String?,
+        cityName: String?,
+        districtName: String?,
+        requireDistrictMatch: Bool = false
+    ) -> (AdministrativeDivision, AdministrativeDivision, AdministrativeDivision)? {
         guard let province = bestMatch(in: provinces, name: provinceName) else { return nil }
         let cities = cities(in: province)
-        guard let city = bestMatch(in: cities, name: cityName) ?? cities.first,
-              let district = bestMatch(in: city.children, name: districtName) ?? city.children.first else { return nil }
+        guard let city = bestMatch(in: cities, name: cityName) ?? cities.first else { return nil }
+        let matchedDistrict = bestMatch(in: city.children, name: districtName)
+        guard let district = matchedDistrict ?? (requireDistrictMatch ? nil : city.children.first) else { return nil }
         return (province, city, district)
     }
 
@@ -113,9 +119,14 @@ struct LinkedCitySelectionView: View {
     @State private var actualCoordinate: CLLocationCoordinate2D?
     @State private var actualLocationText: String
     @State private var selectionIsActualLocation = false
+    @State private var selectionIsMapCoordinate = false
     @State private var isLocating = false
     @State private var locationMessage: String?
     @State private var geocodeRequestID = UUID()
+    @State private var mapLookupRequestID = UUID()
+    @State private var relocationRequestID = UUID()
+    @State private var ignoreMapChangesUntil: Date
+    @State private var mapSelectionMessage: String?
     @State private var isShowingLocationPermissionAlert = false
 
     init(
@@ -141,6 +152,7 @@ struct LinkedCitySelectionView: View {
         _selectedCoordinate = State(initialValue: coordinate)
         _mapPosition = State(initialValue: .region(Self.region(center: coordinate)))
         _actualLocationText = State(initialValue: initialCurrentAddress.isEmpty ? "尚未获取实际位置" : initialCurrentAddress)
+        _ignoreMapChangesUntil = State(initialValue: Date().addingTimeInterval(1))
     }
 
     private var availableProvinces: [AdministrativeDivision] { store.provinces.filter { !$0.children.isEmpty } }
@@ -171,15 +183,39 @@ struct LinkedCitySelectionView: View {
 
     private var mapSection: some View {
         Map(position: $mapPosition) {
-            Marker(district.name, coordinate: selectedCoordinate)
-                .tint(Self.emerald)
             if let actualCoordinate {
                 Marker("我的位置", systemImage: "location.fill", coordinate: actualCoordinate)
                     .tint(.blue)
             }
         }
         .mapControls { MapCompass() }
+        .onMapCameraChange(frequency: .onEnd) { context in
+            guard Date() >= ignoreMapChangesUntil else { return }
+            let coordinate = context.region.center
+            selectedCoordinate = coordinate
+            selectionIsActualLocation = false
+            selectionIsMapCoordinate = true
+            Task { await updateSelectionForMapCenter(coordinate) }
+        }
         .frame(height: 300)
+        .overlay {
+            Image(systemName: "mappin.circle.fill")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(Self.emerald)
+                .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
+                .offset(y: -17)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .overlay(alignment: .topLeading) {
+            Text(mapSelectionMessage ?? "拖动地图选择位置")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(.regularMaterial)
+                .clipShape(Capsule())
+                .padding(12)
+        }
         .overlay(alignment: .bottomTrailing) {
             Button { Task { await relocate() } } label: {
                 Image(systemName: "location.fill")
@@ -238,6 +274,7 @@ struct LinkedCitySelectionView: View {
             HStack(alignment: .top, spacing: 0) {
                 divisionColumn(availableProvinces, selection: province) { newProvince in
                     selectionIsActualLocation = false
+                    selectionIsMapCoordinate = false
                     province = newProvince
                     guard let firstCity = store.cities(in: newProvince).first,
                           let firstDistrict = firstCity.children.first(where: { $0.name != "市辖区" }) ?? firstCity.children.first else { return }
@@ -247,6 +284,7 @@ struct LinkedCitySelectionView: View {
                 Divider()
                 divisionColumn(cities, selection: city) { newCity in
                     selectionIsActualLocation = false
+                    selectionIsMapCoordinate = false
                     city = newCity
                     guard let firstDistrict = newCity.children.first(where: { $0.name != "市辖区" }) ?? newCity.children.first else { return }
                     district = firstDistrict
@@ -254,6 +292,7 @@ struct LinkedCitySelectionView: View {
                 Divider()
                 divisionColumn(districts, selection: district) {
                     selectionIsActualLocation = false
+                    selectionIsMapCoordinate = false
                     district = $0
                 }
             }
@@ -330,7 +369,7 @@ struct LinkedCitySelectionView: View {
 
     @MainActor
     private func updateMapForSelection() async {
-        guard !selectionIsActualLocation else { return }
+        guard !selectionIsActualLocation, !selectionIsMapCoordinate else { return }
         let requestID = UUID()
         geocodeRequestID = requestID
         try? await Task.sleep(for: .milliseconds(300))
@@ -341,8 +380,40 @@ struct LinkedCitySelectionView: View {
 
         selectedCoordinate = coordinate
         withAnimation(.easeInOut(duration: 0.35)) {
-            mapPosition = .region(Self.region(center: coordinate))
+            moveMap(to: coordinate)
         }
+    }
+
+    @MainActor
+    private func updateSelectionForMapCenter(_ coordinate: CLLocationCoordinate2D) async {
+        let requestID = UUID()
+        mapLookupRequestID = requestID
+        mapSelectionMessage = "正在识别地图位置"
+
+        guard let placemark = try? await CLGeocoder()
+            .reverseGeocodeLocation(CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
+            .first,
+              requestID == mapLookupRequestID else {
+            if requestID == mapLookupRequestID { mapSelectionMessage = "无法识别地图位置" }
+            return
+        }
+
+        let districtName = placemark.subLocality ?? placemark.subAdministrativeArea
+        guard let matched = store.selection(
+            provinceName: placemark.administrativeArea,
+            cityName: placemark.locality ?? placemark.administrativeArea,
+            districtName: districtName,
+            requireDistrictMatch: true
+        ), requestID == mapLookupRequestID else {
+            mapSelectionMessage = "当前位置不在可选行政区内"
+            return
+        }
+
+        province = matched.0
+        city = matched.1
+        district = matched.2
+        selectionIsMapCoordinate = true
+        mapSelectionMessage = "已选择 \(matched.2.name)"
     }
 
     @MainActor
@@ -363,18 +434,54 @@ struct LinkedCitySelectionView: View {
         }
 
         isLocating = true
-        locationMessage = "正在获取新的实际位置"
+        locationMessage = "正在获取当前位置"
         defer { isLocating = false }
 
-        guard let location = await locationProvider.freshLocation(timeout: 12) else {
-            locationMessage = "定位失败，请重试"
+        let requestID = UUID()
+        relocationRequestID = requestID
+        let recentLocation = locationProvider.recentLocation(maxAge: 60)
+        async let freshLocation = locationProvider.freshLocation(
+            timeout: 6,
+            desiredAccuracy: kCLLocationAccuracyHundredMeters
+        )
+
+        if let recentLocation {
+            actualCoordinate = recentLocation.coordinate
+            moveMap(to: recentLocation.coordinate)
+            locationMessage = "正在更新定位精度"
+            await applyLocatedPosition(recentLocation, requestID: requestID)
+        }
+
+        guard requestID == relocationRequestID else { return }
+        guard let location = await freshLocation else {
+            if recentLocation == nil {
+                locationMessage = "定位失败，请重试"
+            } else {
+                locationMessage = nil
+            }
             return
         }
 
-        actualCoordinate = location.coordinate
-        mapPosition = .region(Self.region(center: location.coordinate))
+        if let recentLocation,
+           location.timestamp == recentLocation.timestamp,
+           location.coordinate.latitude == recentLocation.coordinate.latitude,
+           location.coordinate.longitude == recentLocation.coordinate.longitude {
+            locationMessage = nil
+            return
+        }
 
-        guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first else {
+        await applyLocatedPosition(location, requestID: requestID)
+    }
+
+    @MainActor
+    private func applyLocatedPosition(_ location: CLLocation, requestID: UUID) async {
+        guard requestID == relocationRequestID else { return }
+
+        actualCoordinate = location.coordinate
+        moveMap(to: location.coordinate)
+
+        guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first,
+              requestID == relocationRequestID else {
             actualLocationText = "已获取坐标，暂时无法识别行政区"
             locationMessage = nil
             return
@@ -382,20 +489,31 @@ struct LinkedCitySelectionView: View {
 
         let provinceName = placemark.administrativeArea
         let cityName = placemark.locality ?? placemark.administrativeArea
-        let districtName = placemark.subLocality
+        let districtName = placemark.subLocality ?? placemark.subAdministrativeArea
         actualLocationText = [provinceName, cityName, districtName, placemark.thoroughfare]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         locationMessage = nil
 
-        if let matched = store.selection(provinceName: provinceName, cityName: cityName, districtName: districtName) {
+        if let matched = store.selection(
+            provinceName: provinceName,
+            cityName: cityName,
+            districtName: districtName,
+            requireDistrictMatch: true
+        ) {
             province = matched.0
             city = matched.1
             district = matched.2
             selectedCoordinate = location.coordinate
             selectionIsActualLocation = true
+            selectionIsMapCoordinate = false
         }
+    }
+
+    private func moveMap(to coordinate: CLLocationCoordinate2D) {
+        ignoreMapChangesUntil = Date().addingTimeInterval(0.8)
+        mapPosition = .region(Self.region(center: coordinate))
     }
 
     private func openLocationSettings() {

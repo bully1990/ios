@@ -204,6 +204,12 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(selection.0.name, "河北省")
         XCTAssertEqual(selection.1.name, "石家庄市")
         XCTAssertEqual(selection.2.name, "长安区")
+        XCTAssertNil(store.selection(
+            provinceName: "河北省",
+            cityName: "石家庄市",
+            districtName: "不存在的区",
+            requireDistrictMatch: true
+        ))
     }
 
     private func decodeShopRecord(imageURL: String, thumbnailURL: String) throws -> ShopCaptureRecord {

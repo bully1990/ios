@@ -43,12 +43,28 @@ final class LocationProvider: NSObject, ObservableObject {
         return await requestLocation(timeout: seconds, minimumTimestamp: nil)
     }
 
-    func freshLocation(timeout seconds: TimeInterval = 12) async -> CLLocation? {
+    func recentLocation(maxAge seconds: TimeInterval = 60) -> CLLocation? {
+        guard let latestLocation,
+              latestLocation.horizontalAccuracy >= 0,
+              abs(latestLocation.timestamp.timeIntervalSinceNow) <= seconds else {
+            return nil
+        }
+        return latestLocation
+    }
+
+    func freshLocation(
+        timeout seconds: TimeInterval = 6,
+        desiredAccuracy: CLLocationAccuracy = kCLLocationAccuracyHundredMeters
+    ) async -> CLLocation? {
+        let previousAccuracy = manager.desiredAccuracy
+        manager.desiredAccuracy = desiredAccuracy
         manager.startUpdatingLocation()
-        return await requestLocation(
+        let location = await requestLocation(
             timeout: seconds,
             minimumTimestamp: Date().addingTimeInterval(-1)
         )
+        manager.desiredAccuracy = previousAccuracy
+        return location
     }
 
     private func requestLocation(timeout seconds: TimeInterval, minimumTimestamp: Date?) async -> CLLocation? {
