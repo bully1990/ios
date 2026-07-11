@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 
 enum ShopCaptureAPIClient {
-    private static let endpoint = URL(string: "https://api.gmpebr.com/index.php?m=content&c=shop_capture&a=ajax_save_record")!
+    private static let endpoint = URL(string: "https://api.gmpebr.com/index.php?m=content&c=shop_capture&a=save_record")!
 
     @discardableResult
     static func upload(_ requestPayload: ShopCaptureUploadRequest) async throws -> ShopCaptureUploadResponse {

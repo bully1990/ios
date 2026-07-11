@@ -92,7 +92,7 @@ enum ShopFeedAPIClient {
             serviceContent: serviceContent,
             phoneNumber: phoneNumber
         )
-        let data = try await sendStreetMutation(action: "ajax_update_record", payload: payload)
+        let data = try await sendStreetMutation(action: "update_record", payload: payload)
         try validateStreetMutation(data)
         let envelope = try JSONDecoder().decode(ShopFeedAPIEnvelope<ShopCaptureRecord>.self, from: data)
         return envelope.data.streetReviewRecord
@@ -100,7 +100,7 @@ enum ShopFeedAPIClient {
 
     static func deleteStreetRecord(id: String) async throws {
         let data = try await sendStreetMutation(
-            action: "ajax_delete_record",
+            action: "delete_record",
             payload: StreetRecordDeletePayload(id: id)
         )
         try validateStreetMutation(data)
@@ -203,7 +203,7 @@ enum ShopFeedAPIClient {
         components.queryItems = [
             URLQueryItem(name: "m", value: "content"),
             URLQueryItem(name: "c", value: "shop_capture"),
-            URLQueryItem(name: "a", value: "ajax_list_records"),
+            URLQueryItem(name: "a", value: "list_records"),
             URLQueryItem(name: "page", value: "\(max(1, page))"),
             URLQueryItem(name: "pagesize", value: "\(max(1, pageSize))")
         ]
@@ -218,7 +218,7 @@ enum ShopFeedAPIClient {
         components.queryItems = [
             URLQueryItem(name: "m", value: "content"),
             URLQueryItem(name: "c", value: "shop_capture"),
-            URLQueryItem(name: "a", value: "ajax_home_records"),
+            URLQueryItem(name: "a", value: "home_records"),
             URLQueryItem(name: "latitude", value: latitude.map { String($0) }),
             URLQueryItem(name: "longitude", value: longitude.map { String($0) }),
             URLQueryItem(name: "keyword", value: keyword)

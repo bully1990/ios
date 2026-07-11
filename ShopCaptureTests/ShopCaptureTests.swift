@@ -144,7 +144,7 @@ final class ShopCaptureTests: XCTestCase {
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
         let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
 
-        XCTAssertEqual(query["a"], "ajax_home_records")
+        XCTAssertEqual(query["a"], "home_records")
         XCTAssertNil(query["page"])
         XCTAssertNil(query["pagesize"])
     }
