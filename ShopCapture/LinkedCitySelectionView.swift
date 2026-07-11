@@ -366,7 +366,7 @@ struct LinkedCitySelectionView: View {
         locationMessage = "正在获取新的实际位置"
         defer { isLocating = false }
 
-        guard let location = await locationProvider.freshLocation(timeout: 5) else {
+        guard let location = await locationProvider.freshLocation(timeout: 12) else {
             locationMessage = "定位失败，请重试"
             return
         }

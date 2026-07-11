@@ -7,7 +7,12 @@ final class LocationProvider: NSObject, ObservableObject {
     @Published private(set) var latestLocation: CLLocation?
 
     private let manager = CLLocationManager()
-    private var waitContinuations: [UUID: CheckedContinuation<CLLocation?, Never>] = [:]
+    private struct LocationWaiter {
+        let minimumTimestamp: Date?
+        let continuation: CheckedContinuation<CLLocation?, Never>
+    }
+
+    private var locationWaiters: [UUID: LocationWaiter] = [:]
 
     override init() {
         authorizationStatus = manager.authorizationStatus
@@ -35,15 +40,18 @@ final class LocationProvider: NSObject, ObservableObject {
             return latestLocation
         }
 
-        return await requestLocation(timeout: seconds)
+        return await requestLocation(timeout: seconds, minimumTimestamp: nil)
     }
 
-    func freshLocation(timeout seconds: TimeInterval = 5) async -> CLLocation? {
-        await requestLocation(timeout: seconds)
+    func freshLocation(timeout seconds: TimeInterval = 12) async -> CLLocation? {
+        manager.startUpdatingLocation()
+        return await requestLocation(
+            timeout: seconds,
+            minimumTimestamp: Date().addingTimeInterval(-1)
+        )
     }
 
-    private func requestLocation(timeout seconds: TimeInterval) async -> CLLocation? {
-
+    private func requestLocation(timeout seconds: TimeInterval, minimumTimestamp: Date?) async -> CLLocation? {
         guard authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways else {
             print("Warning: location has not been authorized; saving coordinates as 0.0.")
             return nil
@@ -52,27 +60,46 @@ final class LocationProvider: NSObject, ObservableObject {
         let waiterID = UUID()
 
         return await withCheckedContinuation { continuation in
-            waitContinuations[waiterID] = continuation
+            locationWaiters[waiterID] = LocationWaiter(
+                minimumTimestamp: minimumTimestamp,
+                continuation: continuation
+            )
             manager.requestLocation()
 
             Task {
                 try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
                 await MainActor.run {
-                    guard let continuation = self.waitContinuations.removeValue(forKey: waiterID) else {
+                    guard let waiter = self.locationWaiters.removeValue(forKey: waiterID) else {
                         return
                     }
 
-                    print("Warning: location was not available within 3 seconds; saving coordinates as 0.0.")
-                    continuation.resume(returning: nil)
+                    let fallback = self.latestLocation.flatMap { location in
+                        location.horizontalAccuracy >= 0
+                            && abs(location.timestamp.timeIntervalSinceNow) <= 60 ? location : nil
+                    }
+                    print("Warning: fresh location was not available before timeout; using recent location if possible.")
+                    waiter.continuation.resume(returning: fallback)
                 }
             }
         }
     }
 
-    private func resolveWaiters(with location: CLLocation?) {
-        let continuations = waitContinuations
-        waitContinuations.removeAll()
-        continuations.values.forEach { $0.resume(returning: location) }
+    private func resolveWaiters(with location: CLLocation) {
+        guard location.horizontalAccuracy >= 0 else { return }
+
+        let readyIDs = locationWaiters.compactMap { id, waiter in
+            guard let minimumTimestamp = waiter.minimumTimestamp else { return id }
+            return location.timestamp >= minimumTimestamp ? id : nil
+        }
+        for id in readyIDs {
+            locationWaiters.removeValue(forKey: id)?.continuation.resume(returning: location)
+        }
+    }
+
+    private func failWaiters() {
+        let waiters = locationWaiters.values
+        locationWaiters.removeAll()
+        waiters.forEach { $0.continuation.resume(returning: nil) }
     }
 }
 
@@ -89,7 +116,7 @@ extension LocationProvider: CLLocationManagerDelegate {
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         Task { @MainActor in
-            guard let location = locations.last else {
+            guard let location = locations.last, location.horizontalAccuracy >= 0 else {
                 return
             }
             latestLocation = location
@@ -100,7 +127,10 @@ extension LocationProvider: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         Task { @MainActor in
             print("Warning: location update failed: \(error.localizedDescription)")
-            resolveWaiters(with: nil)
+            if let locationError = error as? CLError, locationError.code == .locationUnknown {
+                return
+            }
+            failWaiters()
         }
     }
 }
