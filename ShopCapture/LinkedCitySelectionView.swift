@@ -1,0 +1,415 @@
+import CoreLocation
+import MapKit
+import SwiftUI
+import UIKit
+
+struct AdministrativeDivision: Decodable, Identifiable, Hashable {
+    let code: String
+    let name: String
+    let children: [AdministrativeDivision]
+
+    var id: String { code }
+
+    enum CodingKeys: String, CodingKey {
+        case code = "c"
+        case name = "n"
+        case children = "d"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        code = try container.decode(String.self, forKey: .code)
+        name = try container.decode(String.self, forKey: .name)
+        children = try container.decodeIfPresent([AdministrativeDivision].self, forKey: .children) ?? []
+    }
+
+    init(code: String, name: String, children: [AdministrativeDivision]) {
+        self.code = code
+        self.name = name
+        self.children = children
+    }
+}
+
+struct AdministrativeDivisionStore {
+    let provinces: [AdministrativeDivision]
+
+    static let shared = AdministrativeDivisionStore()
+
+    init(bundle: Bundle = .main) {
+        guard let url = bundle.url(forResource: "ChinaAdministrativeDivisions", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([AdministrativeDivision].self, from: data) else {
+            provinces = []
+            return
+        }
+        provinces = decoded
+    }
+
+    init(data: Data) throws {
+        provinces = try JSONDecoder().decode([AdministrativeDivision].self, from: data)
+    }
+
+    func cities(in province: AdministrativeDivision) -> [AdministrativeDivision] {
+        guard let first = province.children.first else { return [] }
+        if first.children.isEmpty {
+            return [AdministrativeDivision(code: province.code, name: province.name, children: province.children)]
+        }
+        return province.children
+    }
+
+    func selection(provinceName: String?, cityName: String?, districtName: String?) -> (AdministrativeDivision, AdministrativeDivision, AdministrativeDivision)? {
+        guard let province = bestMatch(in: provinces, name: provinceName) else { return nil }
+        let cities = cities(in: province)
+        guard let city = bestMatch(in: cities, name: cityName) ?? cities.first,
+              let district = bestMatch(in: city.children, name: districtName) ?? city.children.first else { return nil }
+        return (province, city, district)
+    }
+
+    func selection(cityName: String, districtName: String? = nil) -> (AdministrativeDivision, AdministrativeDivision, AdministrativeDivision)? {
+        for province in provinces {
+            let cities = cities(in: province)
+            if let city = bestMatch(in: cities, name: cityName),
+               let district = bestMatch(in: city.children, name: districtName) ?? city.children.first {
+                return (province, city, district)
+            }
+        }
+        return nil
+    }
+
+    private func bestMatch(in values: [AdministrativeDivision], name: String?) -> AdministrativeDivision? {
+        guard let name, !name.isEmpty else { return nil }
+        let target = Self.normalized(name)
+        return values.first { Self.normalized($0.name) == target }
+            ?? values.first { target.contains(Self.normalized($0.name)) || Self.normalized($0.name).contains(target) }
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.replacingOccurrences(of: "特别行政区", with: "")
+            .replacingOccurrences(of: "维吾尔自治区", with: "")
+            .replacingOccurrences(of: "壮族自治区", with: "")
+            .replacingOccurrences(of: "回族自治区", with: "")
+            .replacingOccurrences(of: "自治区", with: "")
+            .replacingOccurrences(of: "自治州", with: "")
+            .replacingOccurrences(of: "省", with: "")
+            .replacingOccurrences(of: "市", with: "")
+            .replacingOccurrences(of: "区", with: "")
+            .replacingOccurrences(of: "县", with: "")
+    }
+}
+
+struct LinkedCitySelectionView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var locationProvider: LocationProvider
+
+    let onSelect: (CitySelectionResult) -> Void
+
+    private let store = AdministrativeDivisionStore.shared
+
+    @State private var province: AdministrativeDivision
+    @State private var city: AdministrativeDivision
+    @State private var district: AdministrativeDivision
+    @State private var mapPosition: MapCameraPosition
+    @State private var selectedCoordinate: CLLocationCoordinate2D
+    @State private var actualCoordinate: CLLocationCoordinate2D?
+    @State private var actualLocationText: String
+    @State private var selectionIsActualLocation = false
+    @State private var isLocating = false
+    @State private var locationMessage: String?
+    @State private var geocodeRequestID = UUID()
+    @State private var isShowingLocationPermissionAlert = false
+
+    init(
+        selectedCityName: String,
+        initialCurrentCity: String,
+        initialCurrentAddress: String,
+        onSelect: @escaping (CitySelectionResult) -> Void
+    ) {
+        self.onSelect = onSelect
+
+        let store = AdministrativeDivisionStore.shared
+        let fallbackProvince = store.provinces.first { $0.name == "河北省" } ?? store.provinces.first!
+        let fallbackCities = store.cities(in: fallbackProvince)
+        let fallbackCity = fallbackCities.first { $0.name.contains("石家庄") } ?? fallbackCities.first!
+        let fallbackDistrict = fallbackCity.children.first { $0.name == "长安区" } ?? fallbackCity.children.first!
+        let initial = store.selection(cityName: selectedCityName, districtName: initialCurrentAddress)
+            ?? (fallbackProvince, fallbackCity, fallbackDistrict)
+        let coordinate = CLLocationCoordinate2D(latitude: 38.0428, longitude: 114.5149)
+
+        _province = State(initialValue: initial.0)
+        _city = State(initialValue: initial.1)
+        _district = State(initialValue: initial.2)
+        _selectedCoordinate = State(initialValue: coordinate)
+        _mapPosition = State(initialValue: .region(Self.region(center: coordinate)))
+        _actualLocationText = State(initialValue: initialCurrentAddress.isEmpty ? "尚未获取实际位置" : initialCurrentAddress)
+    }
+
+    private var availableProvinces: [AdministrativeDivision] { store.provinces.filter { !$0.children.isEmpty } }
+    private var cities: [AdministrativeDivision] { store.cities(in: province) }
+    private var districts: [AdministrativeDivision] { city.children.filter { $0.name != "市辖区" } }
+    private var selectionQuery: String { "\(province.name) \(city.name) \(district.name)" }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            mapSection
+            locationBand
+            selectors
+            confirmButton
+        }
+        .background(Color(red: 0.975, green: 0.968, blue: 0.944).ignoresSafeArea())
+        .navigationTitle("选择城市")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: selectionQuery) { await updateMapForSelection() }
+        .alert("定位权限未开启", isPresented: $isShowingLocationPermissionAlert) {
+            if locationProvider.authorizationStatus == .denied {
+                Button("去设置") { openLocationSettings() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("开启定位后可重新获取当前实际位置，也可以继续手动选择省市区。")
+        }
+    }
+
+    private var mapSection: some View {
+        Map(position: $mapPosition) {
+            Marker(district.name, coordinate: selectedCoordinate)
+                .tint(Self.emerald)
+            if let actualCoordinate {
+                Marker("我的位置", systemImage: "location.fill", coordinate: actualCoordinate)
+                    .tint(.blue)
+            }
+        }
+        .mapControls { MapCompass() }
+        .frame(height: 300)
+        .overlay(alignment: .bottomTrailing) {
+            Button { Task { await relocate() } } label: {
+                Image(systemName: "location.fill")
+                    .font(.headline)
+                    .foregroundStyle(Self.emerald)
+                    .frame(width: 44, height: 44)
+                    .background(.regularMaterial)
+                    .clipShape(Circle())
+            }
+            .disabled(isLocating)
+            .padding(14)
+            .accessibilityLabel("重新定位当前实际位置")
+        }
+    }
+
+    private var locationBand: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "location.circle.fill")
+                .font(.title3)
+                .foregroundStyle(Self.emerald)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("当前实际位置").font(.subheadline.weight(.semibold))
+                Text(locationMessage ?? actualLocationText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+
+            if isLocating {
+                ProgressView()
+            } else {
+                Button("重新定位") { Task { await relocate() } }
+                    .font(.subheadline.weight(.semibold))
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 72)
+        .background(.background)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var selectors: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                columnTitle("省份")
+                columnTitle("城市")
+                columnTitle("区县")
+            }
+            .frame(height: 42)
+
+            Divider()
+
+            HStack(alignment: .top, spacing: 0) {
+                divisionColumn(availableProvinces, selection: province) { newProvince in
+                    selectionIsActualLocation = false
+                    province = newProvince
+                    guard let firstCity = store.cities(in: newProvince).first,
+                          let firstDistrict = firstCity.children.first(where: { $0.name != "市辖区" }) ?? firstCity.children.first else { return }
+                    city = firstCity
+                    district = firstDistrict
+                }
+                Divider()
+                divisionColumn(cities, selection: city) { newCity in
+                    selectionIsActualLocation = false
+                    city = newCity
+                    guard let firstDistrict = newCity.children.first(where: { $0.name != "市辖区" }) ?? newCity.children.first else { return }
+                    district = firstDistrict
+                }
+                Divider()
+                divisionColumn(districts, selection: district) {
+                    selectionIsActualLocation = false
+                    district = $0
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .background(.background)
+    }
+
+    private func columnTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func divisionColumn(
+        _ values: [AdministrativeDivision],
+        selection: AdministrativeDivision,
+        onSelect: @escaping (AdministrativeDivision) -> Void
+    ) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                LazyVStack(spacing: 0) {
+                    ForEach(values) { value in
+                        Button { onSelect(value) } label: {
+                            Text(value.name)
+                                .font(.subheadline.weight(value == selection ? .semibold : .regular))
+                                .foregroundStyle(value == selection ? Self.emerald : .primary)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.8)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                                .frame(minHeight: 46)
+                                .padding(.horizontal, 4)
+                                .background(value == selection ? Self.softEmerald : .clear)
+                        }
+                        .buttonStyle(.plain)
+                        .id(value.id)
+                    }
+                }
+            }
+            .onAppear { proxy.scrollTo(selection.id, anchor: .center) }
+            .onChange(of: selection.id) { _, id in
+                withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var confirmButton: some View {
+        Button {
+            let option = CityOption(
+                name: displayCityName,
+                latitude: selectedCoordinate.latitude,
+                longitude: selectedCoordinate.longitude,
+                address: district.name
+            )
+            onSelect(selectionIsActualLocation ? .current(option) : .manual(option))
+            dismiss()
+        } label: {
+            Text("确认切换")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(Self.emerald)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .padding(16)
+        .background(.background)
+    }
+
+    private var displayCityName: String { city.code == province.code ? province.name : city.name }
+
+    @MainActor
+    private func updateMapForSelection() async {
+        guard !selectionIsActualLocation else { return }
+        let requestID = UUID()
+        geocodeRequestID = requestID
+        try? await Task.sleep(for: .milliseconds(300))
+        guard requestID == geocodeRequestID,
+              let placemark = try? await CLGeocoder().geocodeAddressString("\(selectionQuery), 中国").first,
+              let coordinate = placemark.location?.coordinate,
+              requestID == geocodeRequestID else { return }
+
+        selectedCoordinate = coordinate
+        withAnimation(.easeInOut(duration: 0.35)) {
+            mapPosition = .region(Self.region(center: coordinate))
+        }
+    }
+
+    @MainActor
+    private func relocate() async {
+        guard !isLocating else { return }
+        locationProvider.requestWhenInUseAuthorization()
+        if locationProvider.authorizationStatus == .notDetermined {
+            for _ in 0..<30 {
+                try? await Task.sleep(for: .milliseconds(100))
+                if locationProvider.authorizationStatus != .notDetermined { break }
+            }
+        }
+
+        guard locationProvider.authorizationStatus == .authorizedAlways
+                || locationProvider.authorizationStatus == .authorizedWhenInUse else {
+            isShowingLocationPermissionAlert = true
+            return
+        }
+
+        isLocating = true
+        locationMessage = "正在获取新的实际位置"
+        defer { isLocating = false }
+
+        guard let location = await locationProvider.freshLocation(timeout: 5) else {
+            locationMessage = "定位失败，请重试"
+            return
+        }
+
+        actualCoordinate = location.coordinate
+        mapPosition = .region(Self.region(center: location.coordinate))
+
+        guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first else {
+            actualLocationText = "已获取坐标，暂时无法识别行政区"
+            locationMessage = nil
+            return
+        }
+
+        let provinceName = placemark.administrativeArea
+        let cityName = placemark.locality ?? placemark.administrativeArea
+        let districtName = placemark.subLocality
+        actualLocationText = [provinceName, cityName, districtName, placemark.thoroughfare]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        locationMessage = nil
+
+        if let matched = store.selection(provinceName: provinceName, cityName: cityName, districtName: districtName) {
+            province = matched.0
+            city = matched.1
+            district = matched.2
+            selectedCoordinate = location.coordinate
+            selectionIsActualLocation = true
+        }
+    }
+
+    private func openLocationSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
+    private static let emerald = Color(red: 0, green: 0.52, blue: 0.37)
+    private static let softEmerald = Color(red: 0.9, green: 0.965, blue: 0.94)
+
+    private static func region(center: CLLocationCoordinate2D) -> MKCoordinateRegion {
+        MKCoordinateRegion(
+            center: center,
+            span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
+        )
+    }
+}
