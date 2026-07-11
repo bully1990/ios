@@ -458,8 +458,9 @@ private struct ServiceHomeView: View {
             }
             shops = mappedShops
         } catch {
-            shops = []
-            hotSearches = []
+            if shops.isEmpty {
+                hotSearches = []
+            }
         }
     }
 
@@ -1296,10 +1297,6 @@ private struct StreetVerifyTaskView: View {
     @State private var loadErrorMessage: String?
     @State private var loadingStatus: StreetRecordStatus?
 
-    private var selectedRecords: [StreetReviewRecord] {
-        pageStates[selectedStatus]?.records ?? []
-    }
-
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
@@ -1331,36 +1328,36 @@ private struct StreetVerifyTaskView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
 
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 12) {
-                            StreetRecordList(status: selectedStatus, records: selectedRecords)
+                    TabView(selection: $selectedStatus) {
+                        ForEach(StreetRecordStatus.allCases) { status in
+                            ScrollView(showsIndicators: false) {
+                                VStack(spacing: 12) {
+                                    StreetRecordList(
+                                        status: status,
+                                        records: pageStates[status]?.records ?? [],
+                                        onChanged: { await refreshStreetRecords(for: status) }
+                                    )
 
-                            if !isReloading, pageStates[selectedStatus]?.hasMore == true {
-                                ZStack {
-                                    Color.clear
-                                        .frame(height: 1)
-
-                                    if loadingStatus == selectedStatus {
+                                    if !isReloading, pageStates[status]?.hasMore == true {
                                         ProgressView("正在加载更多")
+                                            .opacity(loadingStatus == nil || loadingStatus == status ? 1 : 0)
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 44)
+                                            .id("\(status.rawValue)-\(pageStates[status]?.nextPage ?? 1)")
+                                            .onAppear {
+                                                Task { await loadMoreRecords(for: status) }
+                                            }
                                     }
                                 }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: loadingStatus == selectedStatus ? 44 : 1)
-                                .id("\(selectedStatus.rawValue)-\(pageStates[selectedStatus]?.nextPage ?? 1)")
-                                .onAppear {
-                                    Task {
-                                        await loadMoreRecords(for: selectedStatus)
-                                    }
-                                }
+                                .padding(.horizontal, 16)
+                                .padding(.top, 4)
+                                .padding(.bottom, 96)
                             }
+                            .refreshable { await reloadStreetRecords() }
+                            .tag(status)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 4)
-                        .padding(.bottom, 96)
                     }
-                    .refreshable {
-                        await reloadStreetRecords()
-                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
                 }
 
                 if isReloading {
@@ -1435,6 +1432,24 @@ private struct StreetVerifyTaskView: View {
         loadErrorMessage = failedStatuses.isEmpty
             ? nil
             : "\(failedStatuses.map(\.title).joined(separator: "、"))加载失败，已保留原数据"
+    }
+
+    @MainActor
+    private func refreshStreetRecords(for status: StreetRecordStatus) async {
+        while loadingStatus != nil {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+
+        do {
+            pageStates[status] = try await loadedState(
+                for: status,
+                from: StreetPageState(),
+                targetCount: max(10, pageStates[status]?.records.count ?? 0)
+            )
+            loadErrorMessage = nil
+        } catch {
+            loadErrorMessage = "\(status.title)加载失败，已保留原数据"
+        }
     }
 
     @MainActor
@@ -2267,9 +2282,10 @@ private struct StaticFeaturePage: View {
 private struct StreetRecordList: View {
     let status: StreetRecordStatus
     let records: [StreetReviewRecord]
+    let onChanged: @MainActor () async -> Void
 
     var body: some View {
-        StreetRecordStatusList(status: status, records: records)
+        StreetRecordStatusList(status: status, records: records, onChanged: onChanged)
     }
 }
 
@@ -2306,6 +2322,7 @@ private enum StreetRecordStatus: String, CaseIterable, Identifiable {
 private struct StreetRecordStatusList: View {
     let status: StreetRecordStatus
     let records: [StreetReviewRecord]
+    let onChanged: @MainActor () async -> Void
 
     var body: some View {
         Group {
@@ -2323,7 +2340,7 @@ private struct StreetRecordStatusList: View {
                 VStack(spacing: 0) {
                     ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
                         NavigationLink {
-                            StreetReviewRecordDetailView(record: record)
+                            StreetReviewRecordDetailView(record: record, onChanged: onChanged)
                         } label: {
                             StreetRecordRow(record: record)
                         }
@@ -2442,61 +2459,41 @@ private extension StreetReviewState {
 
 private struct StreetReviewRecordDetailView: View {
     let record: StreetReviewRecord
+    let onChanged: @MainActor () async -> Void
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                ShopPhoto(path: record.imageURL, symbol: "storefront.fill")
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 230)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                VStack(spacing: 0) {
-                    detailRow("审核状态", record.reviewState.title, valueColor: record.reviewState.color)
-                    ProfileRowDivider()
-                    detailRow("名称", record.shopName.isEmpty ? "未整理出名称" : record.shopName)
-                    ProfileRowDivider()
-                    detailRow("服务内容", record.serviceContent.isEmpty ? "未整理出服务内容" : record.serviceContent)
-                    ProfileRowDivider()
-                    detailRow("电话", record.phoneNumber.isEmpty ? "无号码" : record.phoneNumber)
-                    ProfileRowDivider()
-                    detailRow("位置", locationText)
-
-                    if let capturedAt = record.capturedAt {
-                        ProfileRowDivider()
-                        detailRow("采集时间", ShopDateFormatter.dateTime(capturedAt))
-                    }
-                }
-                .background(ProfilePalette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        ShopRecordDetailView(
+            record: detailRecord(record),
+            canModify: record.reviewState != .approved,
+            onSave: record.reviewState == .approved ? nil : { shopName, serviceContent, phoneNumber in
+                let updated = try await ShopFeedAPIClient.updateStreetRecord(
+                    id: record.id,
+                    shopName: shopName,
+                    serviceContent: serviceContent,
+                    phoneNumber: phoneNumber
+                )
+                await onChanged()
+                return detailRecord(updated)
+            },
+            onDelete: record.reviewState == .approved ? nil : {
+                try await ShopFeedAPIClient.deleteStreetRecord(id: record.id)
+                await onChanged()
             }
-            .padding(16)
-        }
-        .background(ProfilePalette.groupedBackground)
-        .navigationTitle("扫街详情")
-        .navigationBarTitleDisplayMode(.inline)
+        )
     }
 
-    private func detailRow(_ title: String, _ value: String, valueColor: Color = ProfilePalette.secondaryLabel) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
-            Text(title)
-                .foregroundStyle(ProfilePalette.label)
-
-            Spacer(minLength: 16)
-
-            Text(value)
-                .foregroundStyle(valueColor)
-                .multilineTextAlignment(.trailing)
-        }
-        .font(.subheadline)
-        .padding(14)
-    }
-
-    private var locationText: String {
-        if record.latitude == 0 && record.longitude == 0 {
-            return "未定位"
-        }
-        return String(format: "%.6f, %.6f", record.latitude, record.longitude)
+    private func detailRecord(_ source: StreetReviewRecord) -> ShopDetailRecord {
+        ShopDetailRecord(
+            imagePath: source.imageURL,
+            shopName: source.shopName,
+            serviceContent: source.serviceContent,
+            phoneNumber: source.phoneNumber,
+            latitude: source.latitude,
+            longitude: source.longitude,
+            timestamp: source.capturedAt,
+            statusTitle: source.reviewState.title,
+            statusColor: source.reviewState.color
+        )
     }
 }
 

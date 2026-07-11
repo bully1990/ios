@@ -4,9 +4,11 @@ enum ShopFeedAPIClient {
     private static let baseURL = URL(string: "https://api.gmpebr.com/index.php")!
 
     static func fetchHome(latitude: Double?, longitude: Double?, keyword: String = "") async throws -> ShopHomeFeed {
-        let records = try await fetchRecords()
+        let records = try await fetchHomeRecords(latitude: latitude, longitude: longitude, keyword: keyword)
         let approvedRecords = filtered(records, keyword: keyword).filter { $0.isApproved }
-        let shops = makeFeedShops(records: approvedRecords, latitude: latitude, longitude: longitude, limit: 8)
+        let shops = approvedRecords.prefix(8).enumerated().map { index, record in
+            FeedShop(record: record, latitude: latitude, longitude: longitude).withRank(index + 1)
+        }
         return ShopHomeFeed(
             hotServices: hotServices(from: approvedRecords),
             shops: shops
@@ -78,12 +80,95 @@ enum ShopFeedAPIClient {
         )
     }
 
+    static func updateStreetRecord(
+        id: String,
+        shopName: String,
+        serviceContent: String,
+        phoneNumber: String
+    ) async throws -> StreetReviewRecord {
+        let payload = StreetRecordUpdatePayload(
+            id: id,
+            shopName: shopName,
+            serviceContent: serviceContent,
+            phoneNumber: phoneNumber
+        )
+        let data = try await sendStreetMutation(action: "ajax_update_record", payload: payload)
+        try validateStreetMutation(data)
+        let envelope = try JSONDecoder().decode(ShopFeedAPIEnvelope<ShopCaptureRecord>.self, from: data)
+        return envelope.data.streetReviewRecord
+    }
+
+    static func deleteStreetRecord(id: String) async throws {
+        let data = try await sendStreetMutation(
+            action: "ajax_delete_record",
+            payload: StreetRecordDeletePayload(id: id)
+        )
+        try validateStreetMutation(data)
+        let envelope = try JSONDecoder().decode(ShopFeedAPIEnvelope<StreetRecordDeleteResponse>.self, from: data)
+        _ = envelope.data.id
+    }
+
+    private static func sendStreetMutation<Payload: Encodable>(action: String, payload: Payload) async throws -> Data {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "m", value: "content"),
+            URLQueryItem(name: "c", value: "shop_capture"),
+            URLQueryItem(name: "a", value: action)
+        ]
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return data
+    }
+
+    private static func validateStreetMutation(_ data: Data) throws {
+        let status = try JSONDecoder().decode(ShopFeedStatusEnvelope.self, from: data)
+        guard status.code.value == 200 else {
+            throw ShopFeedAPIError.server(status.message ?? "操作失败")
+        }
+    }
+
     private static func fetchRecords(
         page: Int = 1,
         pageSize: Int = 100,
         auditStatus: String? = nil
     ) async throws -> [ShopCaptureRecord] {
         try await fetchRecordPage(page: page, pageSize: pageSize, auditStatus: auditStatus).records
+    }
+
+    private static func fetchHomeRecords(
+        latitude: Double?,
+        longitude: Double?,
+        keyword: String
+    ) async throws -> [ShopCaptureRecord] {
+        var request = URLRequest(url: homeRecordsURL(latitude: latitude, longitude: longitude, keyword: keyword))
+        request.httpMethod = "GET"
+        request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        let envelope = try JSONDecoder().decode(ShopFeedAPIEnvelope<[ShopCaptureRecord]>.self, from: data)
+        guard envelope.normalizedCode == 200 else {
+            throw URLError(.cannotParseResponse)
+        }
+        return envelope.data
     }
 
     private static func fetchRecordPage(
@@ -125,6 +210,19 @@ enum ShopFeedAPIClient {
         if let auditStatus {
             components.queryItems?.append(URLQueryItem(name: "audit_status", value: auditStatus))
         }
+        return components.url!
+    }
+
+    static func homeRecordsURL(latitude: Double?, longitude: Double?, keyword: String = "") -> URL {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "m", value: "content"),
+            URLQueryItem(name: "c", value: "shop_capture"),
+            URLQueryItem(name: "a", value: "ajax_home_records"),
+            URLQueryItem(name: "latitude", value: latitude.map { String($0) }),
+            URLQueryItem(name: "longitude", value: longitude.map { String($0) }),
+            URLQueryItem(name: "keyword", value: keyword)
+        ].filter { $0.value?.isEmpty == false }
         return components.url!
     }
 
@@ -428,11 +526,62 @@ struct StreetReviewRecord: Identifiable, Sendable {
 
 struct ShopFeedAPIEnvelope<T: Decodable>: Decodable {
     let code: ShopFeedFlexibleInt
+    let message: String?
     let data: T
     let total: ShopFeedFlexibleInt?
 
+    enum CodingKeys: String, CodingKey {
+        case code
+        case message = "msg"
+        case data
+        case total
+    }
+
     var normalizedCode: Int {
         code.value
+    }
+}
+
+private struct StreetRecordUpdatePayload: Encodable {
+    let id: String
+    let shopName: String
+    let serviceContent: String
+    let phoneNumber: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case shopName = "shop_name"
+        case serviceContent = "service_content"
+        case phoneNumber = "phone_number"
+    }
+}
+
+private struct StreetRecordDeletePayload: Encodable {
+    let id: String
+}
+
+private struct StreetRecordDeleteResponse: Decodable {
+    let id: FlexibleString
+}
+
+private struct ShopFeedStatusEnvelope: Decodable {
+    let code: ShopFeedFlexibleInt
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case code
+        case message = "msg"
+    }
+}
+
+private enum ShopFeedAPIError: LocalizedError {
+    case server(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .server(let message):
+            return message
+        }
     }
 }
 

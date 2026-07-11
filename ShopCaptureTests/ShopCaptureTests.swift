@@ -139,6 +139,16 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(query["pagesize"], "20")
     }
 
+    func testHomeRecordsURLUsesLimitedRecommendationAction() throws {
+        let url = ShopFeedAPIClient.homeRecordsURL(latitude: 23.02, longitude: 113.91)
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+
+        XCTAssertEqual(query["a"], "ajax_home_records")
+        XCTAssertNil(query["page"])
+        XCTAssertNil(query["pagesize"])
+    }
+
     func testStreetRecordURLIncludesSelectedReviewState() throws {
         let url = ShopFeedAPIClient.recordsURL(page: 1, pageSize: 10, auditStatus: StreetReviewState.approved.apiValue)
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))

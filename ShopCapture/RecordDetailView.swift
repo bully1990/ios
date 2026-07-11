@@ -1,17 +1,46 @@
 import CoreLocation
 import MapKit
 import SwiftUI
-import UIKit
 
-struct RecordDetailView: View {
+struct ShopDetailRecord {
+    let imagePath: String?
+    let shopName: String
+    let serviceContent: String
+    let phoneNumber: String
+    let latitude: Double
+    let longitude: Double
+    let timestamp: Date?
+    let statusTitle: String?
+    let statusColor: Color
+}
+
+struct ShopRecordDetailView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.managedObjectContext) private var viewContext
-    @ObservedObject var record: ShopRecord
+
+    let canModify: Bool
+    let onSave: ((String, String, String) async throws -> ShopDetailRecord)?
+    let onDelete: (() async throws -> Void)?
+
+    @State private var record: ShopDetailRecord
     @State private var isShowingDeleteConfirmation = false
     @State private var isEditing = false
+    @State private var isWorking = false
+    @State private var errorMessage: String?
     @State private var draftShopName = ""
     @State private var draftServiceContent = ""
     @State private var draftPhoneNumber = ""
+
+    init(
+        record: ShopDetailRecord,
+        canModify: Bool,
+        onSave: ((String, String, String) async throws -> ShopDetailRecord)? = nil,
+        onDelete: (() async throws -> Void)? = nil
+    ) {
+        self.canModify = canModify
+        self.onSave = onSave
+        self.onDelete = onDelete
+        _record = State(initialValue: record)
+    }
 
     var body: some View {
         ScrollView {
@@ -20,6 +49,12 @@ struct RecordDetailView: View {
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                if let statusTitle = record.statusTitle {
+                    Label(statusTitle, systemImage: "checkmark.seal")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(record.statusColor)
+                }
 
                 if isEditing {
                     editableFields
@@ -42,9 +77,9 @@ struct RecordDetailView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(hasValidLocation ? Color.accentColor : Color.gray.opacity(0.55))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .disabled(!hasValidLocation)
+                .disabled(!hasValidLocation || isWorking)
             }
             .padding()
         }
@@ -56,56 +91,77 @@ struct RecordDetailView: View {
                     Button("取消") {
                         cancelEditing()
                     }
+                    .disabled(isWorking)
                 }
             }
 
             ToolbarItem(placement: .topBarTrailing) {
                 if isEditing {
                     Button("保存") {
-                        saveEdits()
+                        Task { await saveEdits() }
                     }
                     .fontWeight(.semibold)
-                } else {
+                    .disabled(isWorking)
+                } else if canModify, onSave != nil || onDelete != nil {
                     Menu {
-                        Button {
-                            beginEditing()
-                        } label: {
-                            Label("编辑内容", systemImage: "pencil")
+                        if onSave != nil {
+                            Button {
+                                beginEditing()
+                            } label: {
+                                Label("编辑内容", systemImage: "pencil")
+                            }
                         }
 
-                        Button(role: .destructive) {
-                            isShowingDeleteConfirmation = true
-                        } label: {
-                            Label("删除", systemImage: "trash")
+                        if onDelete != nil {
+                            Button(role: .destructive) {
+                                isShowingDeleteConfirmation = true
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
+                    .disabled(isWorking)
                 }
             }
         }
-        .confirmationDialog("删除这条历史记录？", isPresented: $isShowingDeleteConfirmation, titleVisibility: .visible) {
+        .confirmationDialog("删除这条店铺记录？", isPresented: $isShowingDeleteConfirmation, titleVisibility: .visible) {
             Button("删除记录", role: .destructive) {
-                deleteRecord()
+                Task { await deleteRecord() }
             }
-
-            Button("取消", role: .cancel) {
-            }
+            Button("取消", role: .cancel) {}
         } message: {
-            Text("删除后会同时移除保存的门头图片。")
+            Text("删除后将无法恢复。")
+        }
+        .alert("操作失败", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "请稍后重试")
+        }
+        .overlay {
+            if isWorking {
+                ProgressView()
+                    .padding(18)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
         }
     }
 
     private var summaryFields: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(record.shopName?.isEmpty == false ? record.shopName ?? "" : "未整理出名称", systemImage: "storefront")
+            Label(record.shopName.isEmpty ? "未整理出名称" : record.shopName, systemImage: "storefront")
                 .font(.headline)
 
-            Label(record.serviceContent?.isEmpty == false ? record.serviceContent ?? "" : "未整理出服务内容", systemImage: "text.badge.checkmark")
+            Label(record.serviceContent.isEmpty ? "未整理出服务内容" : record.serviceContent, systemImage: "text.badge.checkmark")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Label(record.phoneNumber ?? "无号码", systemImage: "phone")
+            Label(record.phoneNumber.isEmpty ? "无号码" : record.phoneNumber, systemImage: "phone")
                 .font(.subheadline)
 
             Label(String(format: "纬度 %.8f，经度 %.8f", record.latitude, record.longitude), systemImage: "location")
@@ -147,6 +203,7 @@ struct RecordDetailView: View {
             TextField(title, text: text, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
+                .disabled(isWorking)
         }
     }
 
@@ -155,7 +212,7 @@ struct RecordDetailView: View {
     }
 
     private var mapPosition: MapCameraPosition {
-        return .region(MKCoordinateRegion(
+        .region(MKCoordinateRegion(
             center: coordinate,
             span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
         ))
@@ -166,56 +223,88 @@ struct RecordDetailView: View {
     }
 
     private func openDirections() {
-        guard hasValidLocation else {
-            return
-        }
-
-        let placemark = MKPlacemark(coordinate: coordinate)
-        let mapItem = MKMapItem(placemark: placemark)
-        mapItem.name = record.shopName?.isEmpty == false ? record.shopName : "门店位置"
+        guard hasValidLocation else { return }
+        let mapItem = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
+        mapItem.name = record.shopName.isEmpty ? "门店位置" : record.shopName
         mapItem.openInMaps(launchOptions: [
             MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
         ])
     }
 
-    private func deleteRecord() {
-        do {
-            try ShopRecordStore.delete(record, context: viewContext)
-            dismiss()
-        } catch {
-            print("Warning: failed to delete record: \(error.localizedDescription)")
-        }
-    }
-
     private func beginEditing() {
-        resetDraft()
+        draftShopName = record.shopName
+        draftServiceContent = record.serviceContent
+        draftPhoneNumber = record.phoneNumber
         isEditing = true
     }
 
     private func cancelEditing() {
-        resetDraft()
         isEditing = false
     }
 
-    private func resetDraft() {
-        draftShopName = record.shopName ?? ""
-        draftServiceContent = record.serviceContent ?? ""
-        draftPhoneNumber = record.phoneNumber ?? ""
-    }
-
-    private func saveEdits() {
+    @MainActor
+    private func saveEdits() async {
+        guard let onSave else { return }
+        isWorking = true
+        defer { isWorking = false }
         do {
-            try ShopRecordStore.update(
-                record,
-                shopName: draftShopName,
-                serviceContent: draftServiceContent,
-                phoneNumber: draftPhoneNumber,
-                fullText: record.fullText,
-                context: viewContext
-            )
+            record = try await onSave(draftShopName, draftServiceContent, draftPhoneNumber)
             isEditing = false
         } catch {
-            print("Warning: failed to update record: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
+    }
+
+    @MainActor
+    private func deleteRecord() async {
+        guard let onDelete else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            try await onDelete()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+struct RecordDetailView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @ObservedObject var record: ShopRecord
+
+    var body: some View {
+        ShopRecordDetailView(
+            record: detailRecord,
+            canModify: true,
+            onSave: { shopName, serviceContent, phoneNumber in
+                try ShopRecordStore.update(
+                    record,
+                    shopName: shopName,
+                    serviceContent: serviceContent,
+                    phoneNumber: phoneNumber,
+                    fullText: record.fullText,
+                    context: viewContext
+                )
+                return detailRecord
+            },
+            onDelete: {
+                try ShopRecordStore.delete(record, context: viewContext)
+            }
+        )
+    }
+
+    private var detailRecord: ShopDetailRecord {
+        ShopDetailRecord(
+            imagePath: record.imagePath,
+            shopName: record.shopName ?? "",
+            serviceContent: record.serviceContent ?? "",
+            phoneNumber: record.phoneNumber ?? "",
+            latitude: record.latitude,
+            longitude: record.longitude,
+            timestamp: record.timestamp,
+            statusTitle: nil,
+            statusColor: .secondary
+        )
     }
 }
