@@ -54,12 +54,12 @@ enum ShopFeedAPIClient {
         page: Int,
         pageSize: Int
     ) async throws -> PagedResult<StreetReviewRecord> {
-        let records = try await fetchRecords(
+        let result = try await fetchRecordPage(
             page: page,
             pageSize: pageSize,
             auditStatus: reviewState.apiValue
         )
-        let items = records
+        let items = result.records
             .map(\.streetReviewRecord)
             .sorted { lhs, rhs in
                 if lhs.capturedAt != rhs.capturedAt {
@@ -67,7 +67,15 @@ enum ShopFeedAPIClient {
                 }
                 return (Int(lhs.id) ?? 0) > (Int(rhs.id) ?? 0)
             }
-        return PagedResult(items: items, page: page, hasMore: records.count == pageSize)
+        guard items.allSatisfy({ $0.reviewState == reviewState }) else {
+            throw URLError(.cannotParseResponse)
+        }
+        return PagedResult(
+            items: items,
+            page: page,
+            hasMore: page * pageSize < result.total,
+            total: result.total
+        )
     }
 
     private static func fetchRecords(
@@ -75,6 +83,14 @@ enum ShopFeedAPIClient {
         pageSize: Int = 100,
         auditStatus: String? = nil
     ) async throws -> [ShopCaptureRecord] {
+        try await fetchRecordPage(page: page, pageSize: pageSize, auditStatus: auditStatus).records
+    }
+
+    private static func fetchRecordPage(
+        page: Int,
+        pageSize: Int,
+        auditStatus: String?
+    ) async throws -> ShopCaptureRecordPage {
         var request = URLRequest(url: recordsURL(page: page, pageSize: pageSize, auditStatus: auditStatus))
         request.httpMethod = "GET"
         request.timeoutInterval = 20
@@ -91,7 +107,10 @@ enum ShopFeedAPIClient {
         guard envelope.normalizedCode == 200 else {
             throw URLError(.cannotParseResponse)
         }
-        return envelope.data
+        return ShopCaptureRecordPage(
+            records: envelope.data,
+            total: envelope.total?.value ?? envelope.data.count
+        )
     }
 
     static func recordsURL(page: Int, pageSize: Int, auditStatus: String? = nil) -> URL {
@@ -196,6 +215,14 @@ struct PagedResult<Item: Sendable>: Sendable {
     let items: [Item]
     let page: Int
     let hasMore: Bool
+    let total: Int?
+
+    init(items: [Item], page: Int, hasMore: Bool, total: Int? = nil) {
+        self.items = items
+        self.page = page
+        self.hasMore = hasMore
+        self.total = total
+    }
 }
 
 struct ShopNearbyFeed: Sendable {
@@ -399,13 +426,19 @@ struct StreetReviewRecord: Identifiable, Sendable {
     let reviewState: StreetReviewState
 }
 
-private struct APIEnvelope<T: Decodable>: Decodable {
+struct APIEnvelope<T: Decodable>: Decodable {
     let code: FlexibleInt
     let data: T
+    let total: FlexibleInt?
 
     var normalizedCode: Int {
         code.value
     }
+}
+
+private struct ShopCaptureRecordPage: Sendable {
+    let records: [ShopCaptureRecord]
+    let total: Int
 }
 
 private struct ShopCaptureRecord: Decodable, Sendable {
@@ -479,7 +512,7 @@ private struct ShopCaptureRecord: Decodable, Sendable {
     }
 }
 
-private struct FlexibleInt: Decodable {
+struct FlexibleInt: Decodable {
     let value: Int
 
     init(from decoder: Decoder) throws {

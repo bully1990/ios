@@ -1277,6 +1277,7 @@ private struct NearbyDiscoveryView: View {
 
 private struct StreetPageState {
     var records: [StreetReviewRecord] = []
+    var total = 0
     var nextPage = 1
     var hasMoreServerRecords = true
     var loadedServerKeys: Set<String> = []
@@ -1406,62 +1407,91 @@ private struct StreetVerifyTaskView: View {
 
     @MainActor
     private func reloadStreetRecords() async {
-        guard !isReloading, loadingStatus == nil else { return }
+        guard !isReloading else { return }
 
         isReloading = true
         defer { isReloading = false }
 
-        pageStates = [:]
-        loadErrorMessage = nil
-
-        for status in [StreetRecordStatus.approved, .rejected, .pending] {
-            await loadMoreRecords(for: status, minimumCount: 10)
+        while loadingStatus != nil {
+            try? await Task.sleep(for: .milliseconds(50))
         }
+
+        var refreshedStates = pageStates
+        var failedStatuses: [StreetRecordStatus] = []
+
+        for status in StreetRecordStatus.allCases {
+            do {
+                refreshedStates[status] = try await loadedState(
+                    for: status,
+                    from: StreetPageState(),
+                    targetCount: 10
+                )
+            } catch {
+                failedStatuses.append(status)
+            }
+        }
+
+        pageStates = refreshedStates
+        loadErrorMessage = failedStatuses.isEmpty
+            ? nil
+            : "\(failedStatuses.map(\.title).joined(separator: "、"))加载失败，已保留原数据"
     }
 
     @MainActor
-    private func loadMoreRecords(for status: StreetRecordStatus, minimumCount: Int? = nil) async {
+    @discardableResult
+    private func loadMoreRecords(for status: StreetRecordStatus, minimumCount: Int? = nil) async -> Bool {
         var state = pageStates[status] ?? StreetPageState()
-        guard loadingStatus == nil, state.hasMore else { return }
+        guard loadingStatus == nil, state.hasMore else { return false }
 
         let targetCount = minimumCount ?? (state.records.count + 10)
         loadingStatus = status
         defer { loadingStatus = nil }
 
         do {
-            var scannedPages = 0
-
-            while state.records.count < targetCount,
-                  state.hasMoreServerRecords,
-                  scannedPages < 20 {
-                let result = try await ShopFeedAPIClient.fetchStreetRecords(
-                    reviewState: status.reviewState,
-                    page: state.nextPage,
-                    pageSize: 10
-                )
-                var loadedKeys = state.loadedServerKeys
-                let newSourceRecords = result.items.filter { record in
-                    loadedKeys.insert(streetRecordKey(record)).inserted
-                }
-                state.loadedServerKeys = loadedKeys
-                let newRecords = newSourceRecords.filter { $0.reviewState == status.reviewState }
-                state.records = mergeStreetRecords(state.records, with: newRecords)
-                state.nextPage = result.page + 1
-                state.hasMoreServerRecords = result.hasMore
-                if !result.items.isEmpty && newSourceRecords.isEmpty {
-                    state.hasMoreServerRecords = false
-                }
-                scannedPages += 1
-            }
-
+            state = try await loadedState(for: status, from: state, targetCount: targetCount)
             pageStates[status] = state
             loadErrorMessage = nil
+            return true
         } catch {
-            pageStates[status] = state
             loadErrorMessage = state.nextPage == 1
                 ? "接口加载失败，请稍后重试"
                 : "更多记录加载失败，请稍后重试"
+            return false
         }
+    }
+
+    private func loadedState(
+        for status: StreetRecordStatus,
+        from initialState: StreetPageState,
+        targetCount: Int
+    ) async throws -> StreetPageState {
+        var state = initialState
+        var scannedPages = 0
+
+        while state.records.count < targetCount,
+              state.hasMoreServerRecords,
+              scannedPages < 20 {
+            let result = try await ShopFeedAPIClient.fetchStreetRecords(
+                reviewState: status.reviewState,
+                page: state.nextPage,
+                pageSize: 10
+            )
+            var loadedKeys = state.loadedServerKeys
+            let newRecords = result.items.filter { record in
+                loadedKeys.insert(streetRecordKey(record)).inserted
+            }
+            state.loadedServerKeys = loadedKeys
+            state.records = mergeStreetRecords(state.records, with: newRecords)
+            state.total = result.total ?? max(state.total, state.records.count)
+            state.nextPage = result.page + 1
+            state.hasMoreServerRecords = result.hasMore
+            if !result.items.isEmpty && newRecords.isEmpty {
+                state.hasMoreServerRecords = false
+            }
+            scannedPages += 1
+        }
+
+        return state
     }
 
     private func mergeStreetRecords(
@@ -1488,7 +1518,7 @@ private struct StreetVerifyTaskView: View {
     }
 
     private func count(for status: StreetRecordStatus) -> Int {
-        pageStates[status]?.records.count ?? 0
+        pageStates[status]?.total ?? 0
     }
 }
 

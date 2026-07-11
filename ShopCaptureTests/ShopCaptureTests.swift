@@ -149,6 +149,14 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(query["audit_status"], "1")
     }
 
+    func testRecordListEnvelopeDecodesStringTotal() throws {
+        let data = Data(#"{"code":200,"data":[],"total":"43"}"#.utf8)
+        let envelope = try JSONDecoder().decode(APIEnvelope<[String]>.self, from: data)
+
+        XCTAssertEqual(envelope.normalizedCode, 200)
+        XCTAssertEqual(envelope.total?.value, 43)
+    }
+
     func testStreetReviewStatesContainOnlyVisibleSegments() {
         XCTAssertEqual(StreetReviewState.allCases, [.pending, .approved, .rejected])
         XCTAssertEqual(StreetReviewState.allCases.map(\.title), ["待审核", "已通过", "未通过"])

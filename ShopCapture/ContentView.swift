@@ -109,8 +109,8 @@ private struct AppLoginView: View {
 
     @EnvironmentObject private var authSession: AuthSession
     @State private var mode: Mode = .login
-    @State private var username = ""
-    @State private var password = ""
+    @State private var username = "demo"
+    @State private var password = "123456"
     @State private var message: String?
     @State private var isWorking = false
     @State private var isPasswordVisible = false
@@ -324,8 +324,8 @@ private struct AppLoginView: View {
 
     private func resetFormForModeChange() {
         message = nil
-        username = ""
-        password = ""
+        username = mode == .login ? "demo" : ""
+        password = mode == .login ? "123456" : ""
         isPasswordVisible = false
         focusedField = nil
     }
