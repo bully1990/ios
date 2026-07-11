@@ -1,27 +1,15 @@
 import CoreLocation
+import Foundation
 import MapKit
 import SwiftUI
 import UIKit
 
-struct AdministrativeDivision: Decodable, Identifiable, Hashable {
+struct AdministrativeDivision: Identifiable, Hashable {
     let code: String
     let name: String
     let children: [AdministrativeDivision]
 
     var id: String { code }
-
-    enum CodingKeys: String, CodingKey {
-        case code = "c"
-        case name = "n"
-        case children = "d"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        code = try container.decode(String.self, forKey: .code)
-        name = try container.decode(String.self, forKey: .name)
-        children = try container.decodeIfPresent([AdministrativeDivision].self, forKey: .children) ?? []
-    }
 
     init(code: String, name: String, children: [AdministrativeDivision]) {
         self.code = code
@@ -36,9 +24,9 @@ struct AdministrativeDivisionStore {
     static let shared = AdministrativeDivisionStore()
 
     init(bundle: Bundle = .main) {
-        guard let url = bundle.url(forResource: "ChinaAdministrativeDivisions", withExtension: "json"),
+        guard let url = bundle.url(forResource: "zh-cn", withExtension: "xml"),
               let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode([AdministrativeDivision].self, from: data) else {
+              let decoded = try? AdministrativeDivisionXMLParser.parse(data) else {
             provinces = []
             return
         }
@@ -46,7 +34,7 @@ struct AdministrativeDivisionStore {
     }
 
     init(data: Data) throws {
-        provinces = try JSONDecoder().decode([AdministrativeDivision].self, from: data)
+        provinces = try AdministrativeDivisionXMLParser.parse(data)
     }
 
     func cities(in province: AdministrativeDivision) -> [AdministrativeDivision] {
@@ -103,6 +91,109 @@ struct AdministrativeDivisionStore {
     }
 }
 
+private final class AdministrativeDivisionXMLParser: NSObject, XMLParserDelegate {
+    private struct CityNode {
+        let code: String
+        let name: String
+        var regions: [AdministrativeDivision]
+    }
+
+    private var provinces: [AdministrativeDivision] = []
+    private var stateCode: String?
+    private var stateName: String?
+    private var cities: [CityNode] = []
+    private var city: CityNode?
+
+    static func parse(_ data: Data) throws -> [AdministrativeDivision] {
+        let delegate = AdministrativeDivisionXMLParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        guard parser.parse() else {
+            throw parser.parserError ?? CocoaError(.fileReadCorruptFile)
+        }
+        return delegate.provinces
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        switch elementName {
+        case "State":
+            stateCode = attributeDict["Code"]
+            stateName = clean(attributeDict["Name"])
+            cities = []
+        case "City":
+            guard let stateCode,
+                  let code = attributeDict["Code"],
+                  let name = clean(attributeDict["Name"]) else { return }
+            city = CityNode(code: "\(stateCode)-\(code)", name: name, regions: [])
+        case "Region":
+            guard var city,
+                  let code = attributeDict["Code"],
+                  let name = clean(attributeDict["Name"]) else { return }
+            city.regions.append(
+                AdministrativeDivision(code: "\(city.code)-\(code)", name: name, children: [])
+            )
+            self.city = city
+        default:
+            break
+        }
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
+        switch elementName {
+        case "City":
+            if let city { cities.append(city) }
+            city = nil
+        case "State":
+            appendState()
+            stateCode = nil
+            stateName = nil
+            cities = []
+        default:
+            break
+        }
+    }
+
+    private func appendState() {
+        guard let stateCode, let stateName else { return }
+        let children: [AdministrativeDivision]
+
+        if Self.municipalityCodes.contains(stateCode) {
+            let districts = cities.map {
+                AdministrativeDivision(code: $0.code, name: $0.name, children: [])
+            }
+            children = [AdministrativeDivision(code: "\(stateCode)-city", name: stateName, children: districts)]
+        } else {
+            children = cities.map { city in
+                let districts = city.regions.isEmpty
+                    ? [AdministrativeDivision(code: "\(city.code)-self", name: city.name, children: [])]
+                    : city.regions
+                return AdministrativeDivision(code: city.code, name: city.name, children: districts)
+            }
+        }
+
+        provinces.append(AdministrativeDivision(code: stateCode, name: stateName, children: children))
+    }
+
+    private func clean(_ value: String?) -> String? {
+        value?
+            .replacingOccurrences(of: "　", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static let municipalityCodes: Set<String> = ["11", "12", "31", "50"]
+}
+
 struct LinkedCitySelectionView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var locationProvider: LocationProvider
@@ -138,7 +229,7 @@ struct LinkedCitySelectionView: View {
         self.onSelect = onSelect
 
         let store = AdministrativeDivisionStore.shared
-        let fallbackProvince = store.provinces.first { $0.name == "河北省" } ?? store.provinces.first!
+        let fallbackProvince = store.provinces.first { $0.name.contains("河北") } ?? store.provinces.first!
         let fallbackCities = store.cities(in: fallbackProvince)
         let fallbackCity = fallbackCities.first { $0.name.contains("石家庄") } ?? fallbackCities.first!
         let fallbackDistrict = fallbackCity.children.first { $0.name == "长安区" } ?? fallbackCity.children.first!

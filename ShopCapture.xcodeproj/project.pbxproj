@@ -33,7 +33,7 @@
 		0A0000522C31000100000000 /* ShopFeedAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000512C31000100000000 /* ShopFeedAPIClient.swift */; };
 		0A0000542C31000100000000 /* QwenVisionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000532C31000100000000 /* QwenVisionClient.swift */; };
 		0A0000562C31000100000000 /* LinkedCitySelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000552C31000100000000 /* LinkedCitySelectionView.swift */; };
-		0A0000582C31000100000000 /* ChinaAdministrativeDivisions.json in Resources */ = {isa = PBXBuildFile; fileRef = 0A0000572C31000100000000 /* ChinaAdministrativeDivisions.json */; };
+		0A0000582C31000100000000 /* zh-cn.xml in Resources */ = {isa = PBXBuildFile; fileRef = 0A0000572C31000100000000 /* zh-cn.xml */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,7 +76,7 @@
 		0A0000512C31000100000000 /* ShopFeedAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShopFeedAPIClient.swift; sourceTree = "<group>"; };
 		0A0000532C31000100000000 /* QwenVisionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenVisionClient.swift; sourceTree = "<group>"; };
 		0A0000552C31000100000000 /* LinkedCitySelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkedCitySelectionView.swift; sourceTree = "<group>"; };
-		0A0000572C31000100000000 /* ChinaAdministrativeDivisions.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Resources/ChinaAdministrativeDivisions.json; sourceTree = "<group>"; };
+		0A0000572C31000100000000 /* zh-cn.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Resources/zh-cn.xml; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -133,7 +133,7 @@
 				0A0000492C31000100000000 /* CaptureGuide.swift */,
 				0A00001C2C31000100000000 /* PhoneNumberExtractor.swift */,
 				0A00001D2C31000100000000 /* Assets.xcassets */,
-				0A0000572C31000100000000 /* ChinaAdministrativeDivisions.json */,
+				0A0000572C31000100000000 /* zh-cn.xml */,
 				0A00001E2C31000100000000 /* Info.plist */,
 				0A00001F2C31000100000000 /* ShopRecord.xcdatamodeld */,
 			);
@@ -239,7 +239,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0A00000D2C31000100000000 /* Assets.xcassets in Resources */,
-				0A0000582C31000100000000 /* ChinaAdministrativeDivisions.json in Resources */,
+				0A0000582C31000100000000 /* zh-cn.xml in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
