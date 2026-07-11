@@ -15,25 +15,6 @@ enum ShopFeedAPIClient {
         )
     }
 
-    static func fetchAllShops(
-        latitude: Double?,
-        longitude: Double?,
-        keyword: String = "",
-        page: Int,
-        pageSize: Int
-    ) async throws -> PagedResult<FeedShop> {
-        let records = try await fetchRecords(page: page, pageSize: pageSize, auditStatus: "1")
-        let approvedRecords = filtered(records, keyword: keyword).filter { $0.isApproved }
-        let shops = makeFeedShops(
-            records: approvedRecords,
-            latitude: latitude,
-            longitude: longitude,
-            limit: pageSize,
-            rankOffset: (page - 1) * pageSize
-        )
-        return PagedResult(items: shops, page: page, hasMore: records.count == pageSize)
-    }
-
     static func fetchNearby(latitude: Double?, longitude: Double?, keyword: String = "", service: String = "全部") async throws -> ShopNearbyFeed {
         let query = keyword.isEmpty ? (service == "全部" ? "" : service) : keyword
         let records = filtered(try await fetchRecords(), keyword: query).filter { $0.isApproved }

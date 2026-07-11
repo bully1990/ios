@@ -149,6 +149,7 @@ struct CameraCaptureView: View {
                     let guide = captureGuideRegion
                     let footerWidth = min(proxy.size.width * guide.width, 520)
                     let footerY = min(proxy.size.height - 58, proxy.size.height * guide.maxY + 64)
+                    let leftSideX = max(45, proxy.size.width * guide.minX / 2)
                     let sideX = min(proxy.size.width - 68, proxy.size.width * guide.maxX + 78)
 
                     landscapeFooterControls
@@ -158,6 +159,12 @@ struct CameraCaptureView: View {
                     landscapeSideActionButtons
                         .frame(width: 86)
                         .position(x: sideX, y: proxy.size.height * guide.midY)
+
+                    if processor.isRecognizing {
+                        landscapeZoomResetControls
+                            .frame(width: 86)
+                            .position(x: leftSideX, y: proxy.size.height * guide.midY)
+                    }
                 }
                 .ignoresSafeArea()
             }
@@ -203,12 +210,15 @@ struct CameraCaptureView: View {
                 Spacer()
 
                 Button {
-                    processor.stop()
-                    onClose()
+                    if processor.isRecognizing {
+                        processor.stop()
+                    } else {
+                        onClose()
+                    }
                 } label: {
                     toolbarIcon("xmark")
                 }
-                .accessibilityLabel("关闭扫街")
+                .accessibilityLabel(processor.isRecognizing ? "返回模式选择" : "关闭扫街")
             }
 
             Button {
@@ -296,9 +306,7 @@ struct CameraCaptureView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
-            if processor.isRecognizing {
-                zoomResetStrip
-            } else {
+            if !processor.isRecognizing {
                 Button {
                     toggleRecognition()
                 } label: {
@@ -313,6 +321,31 @@ struct CameraCaptureView: View {
                 }
                 .accessibilityLabel(recognitionMode.startTitle)
             }
+        }
+    }
+
+    private var landscapeZoomResetControls: some View {
+        VStack(spacing: 12) {
+            Label(String(format: "%.1fx", processor.zoomFactor), systemImage: "plus.magnifyingglass")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(.black.opacity(0.48))
+                .clipShape(Capsule())
+
+            Button {
+                resetPreviewTransform()
+            } label: {
+                Text("重置")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 60)
+                    .background(.white.opacity(0.95))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .accessibilityLabel("重置取景")
         }
     }
 

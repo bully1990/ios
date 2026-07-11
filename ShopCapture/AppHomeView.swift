@@ -151,6 +151,7 @@ private struct TopReloadIndicator: View {
 }
 
 private struct ServiceHomeView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var locationProvider: LocationProvider
     @AppStorage("shopcapture.usesManualCity") private var usesManualCity = false
     @AppStorage("shopcapture.manualCityName") private var manualCityName = ""
@@ -164,8 +165,7 @@ private struct ServiceHomeView: View {
     @State private var hasLoadedHome = false
     @State private var isReloading = false
     @State private var hasPendingReload = false
-    @State private var activeLatitude: Double?
-    @State private var activeLongitude: Double?
+    @State private var isShowingLocationPermissionAlert = false
 
     var body: some View {
         NavigationStack {
@@ -204,6 +204,40 @@ private struct ServiceHomeView: View {
                     await reloadHome()
                 }
             }
+            .onChange(of: locationProvider.authorizationStatus) { _, status in
+                switch status {
+                case .authorizedAlways, .authorizedWhenInUse:
+                    guard !usesManualCity else { return }
+                    Task { await reloadHome() }
+                case .denied, .restricted:
+                    isShowingLocationPermissionAlert = true
+                case .notDetermined:
+                    break
+                @unknown default:
+                    break
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active,
+                      !usesManualCity,
+                      locationProvider.authorizationStatus == .authorizedAlways
+                        || locationProvider.authorizationStatus == .authorizedWhenInUse else {
+                    return
+                }
+                Task { await reloadHome() }
+            }
+            .alert("定位权限未开启", isPresented: $isShowingLocationPermissionAlert) {
+                if locationProvider.authorizationStatus == .denied {
+                    Button("去设置") {
+                        openLocationSettings()
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(locationProvider.authorizationStatus == .restricted
+                    ? "定位权限受到系统限制，暂时无法获取当前位置。"
+                    : "请在系统设置中允许定位，以便展示所在城市和附近店铺。")
+            }
         }
     }
 
@@ -226,6 +260,18 @@ private struct ServiceHomeView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("选择城市，当前\(city)")
+
+            Button {
+                applyCitySelection(nil)
+            } label: {
+                Label(usesManualCity ? "当前位置" : district, systemImage: "location.circle")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(DesignTokens.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("使用当前位置")
 
             Spacer()
         }
@@ -275,21 +321,6 @@ private struct ServiceHomeView: View {
                     .accessibilityLabel("清空搜索")
                 }
 
-                Divider()
-                    .frame(height: 26)
-
-                Button {
-                    applyCitySelection(nil)
-                } label: {
-                    Label(usesManualCity ? "当前位置" : district, systemImage: "location.circle")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(DesignTokens.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: 108)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("使用当前位置")
             }
             .padding(.horizontal, 18)
             .frame(height: 62)
@@ -346,24 +377,6 @@ private struct ServiceHomeView: View {
                 )
             }
 
-            if !shops.isEmpty {
-                NavigationLink {
-                    AllRecommendedShopsView(
-                        keyword: searchText,
-                        latitude: activeLatitude,
-                        longitude: activeLongitude
-                    )
-                } label: {
-                    HStack {
-                        Spacer()
-                        Text("查看全部店铺")
-                        Image(systemName: "chevron.right")
-                        Spacer()
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(DesignTokens.secondaryText)
-                }
-            }
         }
     }
 
@@ -437,12 +450,16 @@ private struct ServiceHomeView: View {
         } else {
             locationProvider.requestWhenInUseAuthorization()
             await waitForLocationAuthorizationIfNeeded()
+            if locationProvider.authorizationStatus == .denied
+                || locationProvider.authorizationStatus == .restricted {
+                isShowingLocationPermissionAlert = true
+            }
             location = await locationProvider.currentLocation(timeout: 2)
             locationName = await resolveLocationName(location)
         }
 
-        activeLatitude = location?.coordinate.latitude
-        activeLongitude = location?.coordinate.longitude
+        city = locationName?.city ?? (location == nil ? "未定位" : "当前位置")
+        district = locationName?.district ?? (location == nil ? "请开启定位" : "附近街区")
 
         do {
             let feed = try await ShopFeedAPIClient.fetchHome(
@@ -450,8 +467,6 @@ private struct ServiceHomeView: View {
                 longitude: location?.coordinate.longitude,
                 keyword: keyword
             )
-            city = locationName?.city ?? (location == nil ? "未定位" : "当前位置")
-            district = locationName?.district ?? (location == nil ? "请开启定位" : "附近街区")
             hotSearches = feed.hotServices
             let mappedShops = feed.shops.enumerated().map { index, shop in
                 shop.recommendedShop(fallbackRank: index + 1)
@@ -512,6 +527,13 @@ private struct ServiceHomeView: View {
             manualCityName = ""
             manualCityLatitude = 0
             manualCityLongitude = 0
+
+            if locationProvider.authorizationStatus == .denied
+                || locationProvider.authorizationStatus == .restricted {
+                isShowingLocationPermissionAlert = true
+                return
+            }
+
             city = "正在定位"
             district = "当前位置"
         }
@@ -519,6 +541,11 @@ private struct ServiceHomeView: View {
         Task {
             await reloadHome()
         }
+    }
+
+    private func openLocationSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }
 
@@ -913,150 +940,6 @@ private struct RecommendedShopRow: View {
     }
 }
 
-private struct AllRecommendedShopsView: View {
-    let keyword: String
-    let latitude: Double?
-    let longitude: Double?
-
-    @State private var shops: [RecommendedShop] = []
-    @State private var isLoading = false
-    @State private var loadFailed = false
-    @State private var nextPage = 1
-    @State private var hasMoreServerPages = true
-    @State private var bufferedFeedShops: [FeedShop] = []
-
-    private let pageSize = 10
-
-    private var hasMorePages: Bool {
-        hasMoreServerPages || !bufferedFeedShops.isEmpty
-    }
-
-    var body: some View {
-        Group {
-            if shops.isEmpty && !isLoading {
-                VStack(spacing: 16) {
-                    ContentUnavailableView(
-                        loadFailed ? "店铺加载失败" : "暂无店铺",
-                        systemImage: loadFailed ? "wifi.exclamationmark" : "storefront",
-                        description: Text(loadFailed ? "请重新加载" : "暂未找到符合条件的已审核店铺")
-                    )
-
-                    if loadFailed {
-                        Button("重新加载") {
-                            Task {
-                                await loadShops(reset: true)
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-            } else {
-                List(shops) { shop in
-                    NavigationLink {
-                        RecommendedShopDetailView(shop: shop)
-                    } label: {
-                        RecommendedShopRow(shop: shop, showsDisclosureIndicator: false)
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .onAppear {
-                        guard shop.id == shops.last?.id else { return }
-                        Task {
-                            await loadShops(reset: false)
-                        }
-                    }
-
-                    if shop.id == shops.last?.id, isLoading, !shops.isEmpty {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
-                        }
-                        .listRowSeparator(.hidden)
-                    }
-                }
-                .listStyle(.plain)
-                .refreshable {
-                    await loadShops(reset: true)
-                }
-            }
-        }
-        .overlay {
-            if isLoading && shops.isEmpty {
-                ProgressView("正在加载店铺")
-            }
-        }
-        .navigationTitle(keyword.isEmpty ? "全部店铺" : "搜索结果")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            guard shops.isEmpty else { return }
-            await loadShops(reset: true)
-        }
-    }
-
-    @MainActor
-    private func loadShops(reset: Bool) async {
-        guard !isLoading, reset || hasMorePages else { return }
-
-        isLoading = true
-        defer { isLoading = false }
-
-        if reset {
-            nextPage = 1
-            hasMoreServerPages = true
-            bufferedFeedShops = []
-            loadFailed = false
-        }
-
-        do {
-            var page = nextPage
-            var accumulated = bufferedFeedShops
-            var pageHasMore = hasMoreServerPages
-            var seenIDs = Set(accumulated.map(\.id))
-            if !reset {
-                seenIDs.formUnion(shops.compactMap { Int($0.id) })
-            }
-            var scannedPages = 0
-
-            while accumulated.count < pageSize, pageHasMore, scannedPages < 20 {
-                let result = try await ShopFeedAPIClient.fetchAllShops(
-                    latitude: latitude,
-                    longitude: longitude,
-                    keyword: keyword,
-                    page: page,
-                    pageSize: pageSize
-                )
-                let uniqueItems = result.items.filter { seenIDs.insert($0.id).inserted }
-                accumulated.append(contentsOf: uniqueItems)
-                pageHasMore = result.hasMore
-                if !result.items.isEmpty && uniqueItems.isEmpty {
-                    pageHasMore = false
-                }
-                page += 1
-                scannedPages += 1
-            }
-
-            let batch = Array(accumulated.prefix(pageSize))
-            bufferedFeedShops = Array(accumulated.dropFirst(batch.count))
-
-            let mapped = batch.enumerated().map { index, shop in
-                let rank = (reset ? 0 : shops.count) + index + 1
-                return shop.withRank(rank).recommendedShop(fallbackRank: rank)
-            }
-            let existingIDs = reset ? Set<String>() : Set(shops.map(\.id))
-            let newShops = mapped.filter { !existingIDs.contains($0.id) }
-            shops = reset ? newShops : shops + newShops
-            nextPage = page
-            hasMoreServerPages = pageHasMore
-            if newShops.isEmpty && bufferedFeedShops.isEmpty {
-                hasMoreServerPages = false
-            }
-            loadFailed = false
-        } catch {
-            loadFailed = true
-        }
-    }
-}
-
 private struct RecommendedShopDetailView: View {
     let shop: RecommendedShop
 
@@ -1296,6 +1179,7 @@ private struct StreetVerifyTaskView: View {
     @State private var pageStates: [StreetRecordStatus: StreetPageState] = [:]
     @State private var loadErrorMessage: String?
     @State private var loadingStatus: StreetRecordStatus?
+    @State private var loadingPageKeys: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -1331,14 +1215,16 @@ private struct StreetVerifyTaskView: View {
                     TabView(selection: $selectedStatus) {
                         ForEach(StreetRecordStatus.allCases) { status in
                             ScrollView(showsIndicators: false) {
-                                VStack(spacing: 12) {
+                                LazyVStack(spacing: 12) {
                                     StreetRecordList(
                                         status: status,
                                         records: pageStates[status]?.records ?? [],
                                         onChanged: { await refreshStreetRecords(for: status) }
                                     )
 
-                                    if !isReloading, pageStates[status]?.hasMore == true {
+                                    if selectedStatus == status,
+                                       !isReloading,
+                                       pageStates[status]?.hasMore == true {
                                         ProgressView("正在加载更多")
                                             .opacity(loadingStatus == nil || loadingStatus == status ? 1 : 0)
                                             .frame(maxWidth: .infinity)
@@ -1353,7 +1239,7 @@ private struct StreetVerifyTaskView: View {
                                 .padding(.top, 4)
                                 .padding(.bottom, 96)
                             }
-                            .refreshable { await reloadStreetRecords() }
+                            .refreshable { await refreshStreetRecords(for: status) }
                             .tag(status)
                         }
                     }
@@ -1418,11 +1304,7 @@ private struct StreetVerifyTaskView: View {
 
         for status in StreetRecordStatus.allCases {
             do {
-                refreshedStates[status] = try await loadedState(
-                    for: status,
-                    from: StreetPageState(),
-                    targetCount: 10
-                )
+                refreshedStates[status] = try await firstPageState(for: status)
             } catch {
                 failedStatuses.append(status)
             }
@@ -1441,11 +1323,8 @@ private struct StreetVerifyTaskView: View {
         }
 
         do {
-            pageStates[status] = try await loadedState(
-                for: status,
-                from: StreetPageState(),
-                targetCount: max(10, pageStates[status]?.records.count ?? 0)
-            )
+            let refreshedState = try await firstPageState(for: status)
+            pageStates[status] = refreshedState
             loadErrorMessage = nil
         } catch {
             loadErrorMessage = "\(status.title)加载失败，已保留原数据"
@@ -1454,16 +1333,42 @@ private struct StreetVerifyTaskView: View {
 
     @MainActor
     @discardableResult
-    private func loadMoreRecords(for status: StreetRecordStatus, minimumCount: Int? = nil) async -> Bool {
+    private func loadMoreRecords(for status: StreetRecordStatus) async -> Bool {
         var state = pageStates[status] ?? StreetPageState()
-        guard loadingStatus == nil, state.hasMore else { return false }
+        let requestedPage = state.nextPage
+        let requestKey = "\(status.rawValue):\(requestedPage)"
+        guard loadingStatus == nil,
+              state.hasMore,
+              loadingPageKeys.insert(requestKey).inserted else {
+            return false
+        }
 
-        let targetCount = minimumCount ?? (state.records.count + 10)
         loadingStatus = status
-        defer { loadingStatus = nil }
+        defer {
+            loadingStatus = nil
+            loadingPageKeys.remove(requestKey)
+        }
 
         do {
-            state = try await loadedState(for: status, from: state, targetCount: targetCount)
+            let result = try await ShopFeedAPIClient.fetchStreetRecords(
+                reviewState: status.reviewState,
+                page: requestedPage,
+                pageSize: 10
+            )
+            guard pageStates[status]?.nextPage == requestedPage else {
+                return false
+            }
+            var loadedKeys = state.loadedServerKeys
+            let newRecords = result.items.filter { record in
+                loadedKeys.insert(streetRecordKey(record)).inserted
+            }
+            state.loadedServerKeys = loadedKeys
+            state.records = mergeStreetRecords(state.records, with: newRecords)
+            state.total = result.total ?? max(state.total, state.records.count)
+            state.nextPage = result.page + 1
+            state.hasMoreServerRecords = result.hasMore
+                && !result.items.isEmpty
+                && !newRecords.isEmpty
             pageStates[status] = state
             loadErrorMessage = nil
             return true
@@ -1475,38 +1380,20 @@ private struct StreetVerifyTaskView: View {
         }
     }
 
-    private func loadedState(
-        for status: StreetRecordStatus,
-        from initialState: StreetPageState,
-        targetCount: Int
-    ) async throws -> StreetPageState {
-        var state = initialState
-        var scannedPages = 0
-
-        while state.records.count < targetCount,
-              state.hasMoreServerRecords,
-              scannedPages < 20 {
-            let result = try await ShopFeedAPIClient.fetchStreetRecords(
-                reviewState: status.reviewState,
-                page: state.nextPage,
-                pageSize: 10
-            )
-            var loadedKeys = state.loadedServerKeys
-            let newRecords = result.items.filter { record in
-                loadedKeys.insert(streetRecordKey(record)).inserted
-            }
-            state.loadedServerKeys = loadedKeys
-            state.records = mergeStreetRecords(state.records, with: newRecords)
-            state.total = result.total ?? max(state.total, state.records.count)
-            state.nextPage = result.page + 1
-            state.hasMoreServerRecords = result.hasMore
-            if !result.items.isEmpty && newRecords.isEmpty {
-                state.hasMoreServerRecords = false
-            }
-            scannedPages += 1
-        }
-
-        return state
+    private func firstPageState(for status: StreetRecordStatus) async throws -> StreetPageState {
+        let result = try await ShopFeedAPIClient.fetchStreetRecords(
+            reviewState: status.reviewState,
+            page: 1,
+            pageSize: 10
+        )
+        let keys = Set(result.items.map(streetRecordKey))
+        return StreetPageState(
+            records: result.items,
+            total: result.total ?? result.items.count,
+            nextPage: 2,
+            hasMoreServerRecords: result.hasMore && !result.items.isEmpty,
+            loadedServerKeys: keys
+        )
     }
 
     private func mergeStreetRecords(
