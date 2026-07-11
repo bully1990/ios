@@ -150,6 +150,51 @@ private struct TopReloadIndicator: View {
     }
 }
 
+private struct ResolvedLocationName {
+    let city: String
+    let address: String
+}
+
+private enum LocationNameResolver {
+    static func resolve(_ location: CLLocation?) async -> ResolvedLocationName? {
+        guard let location else { return nil }
+
+        do {
+            guard let placemark = try await CLGeocoder()
+                .reverseGeocodeLocation(location)
+                .first else {
+                return nil
+            }
+
+            let city = placemark.locality
+                ?? placemark.administrativeArea
+                ?? "当前位置"
+            let addressParts = [
+                placemark.subLocality,
+                placemark.thoroughfare,
+                placemark.subThoroughfare,
+                placemark.name
+            ]
+            var seen = Set<String>()
+            let address = addressParts.compactMap { part -> String? in
+                guard let value = part?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !value.isEmpty,
+                      seen.insert(value).inserted else {
+                    return nil
+                }
+                return value
+            }.joined(separator: " ")
+
+            return ResolvedLocationName(
+                city: city,
+                address: address.isEmpty ? "附近街区" : address
+            )
+        } catch {
+            return nil
+        }
+    }
+}
+
 private struct ServiceHomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var locationProvider: LocationProvider
@@ -161,6 +206,8 @@ private struct ServiceHomeView: View {
     @State private var hotSearches: [String] = []
     @State private var city = "未定位"
     @State private var district = "请开启定位"
+    @State private var currentLocationCity = ""
+    @State private var currentLocationAddress = ""
     @State private var searchText = ""
     @State private var hasLoadedHome = false
     @State private var isReloading = false
@@ -244,14 +291,26 @@ private struct ServiceHomeView: View {
     private var header: some View {
         HStack {
             NavigationLink {
-                CitySelectionView(selectedCityName: city) { selection in
+                CitySelectionView(
+                    selectedCityName: city,
+                    initialCurrentCity: currentLocationCity.isEmpty ? city : currentLocationCity,
+                    initialCurrentAddress: currentLocationAddress.isEmpty ? district : currentLocationAddress
+                ) { selection in
                     applyCitySelection(selection)
                 }
             } label: {
-                HStack(spacing: 7) {
+                HStack(alignment: .center, spacing: 9) {
                     Image(systemName: "mappin.circle.fill")
-                    Text(city)
-                        .font(.title3.weight(.bold))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(city)
+                            .font(.title3.weight(.bold))
+                        Text(district)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(DesignTokens.secondaryText)
+                            .lineLimit(1)
+                    }
+
                     Image(systemName: "chevron.down")
                         .font(.caption.weight(.bold))
                 }
@@ -259,19 +318,7 @@ private struct ServiceHomeView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("选择城市，当前\(city)")
-
-            Button {
-                applyCitySelection(nil)
-            } label: {
-                Label(usesManualCity ? "当前位置" : district, systemImage: "location.circle")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(DesignTokens.secondaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("使用当前位置")
+            .accessibilityLabel("选择城市，当前\(city)，\(district)")
 
             Spacer()
         }
@@ -442,11 +489,11 @@ private struct ServiceHomeView: View {
     @MainActor
     private func loadHome(keyword: String = "") async {
         let location: CLLocation?
-        let locationName: (city: String, district: String)?
+        let locationName: ResolvedLocationName?
 
         if usesManualCity, !manualCityName.isEmpty, manualCityLatitude != 0, manualCityLongitude != 0 {
             location = CLLocation(latitude: manualCityLatitude, longitude: manualCityLongitude)
-            locationName = (manualCityName, "手动选择")
+            locationName = ResolvedLocationName(city: manualCityName, address: "手动选择")
         } else {
             locationProvider.requestWhenInUseAuthorization()
             await waitForLocationAuthorizationIfNeeded()
@@ -455,11 +502,20 @@ private struct ServiceHomeView: View {
                 isShowingLocationPermissionAlert = true
             }
             location = await locationProvider.currentLocation(timeout: 2)
-            locationName = await resolveLocationName(location)
+            locationName = await LocationNameResolver.resolve(location)
         }
 
-        city = locationName?.city ?? (location == nil ? "未定位" : "当前位置")
-        district = locationName?.district ?? (location == nil ? "请开启定位" : "附近街区")
+        if let locationName {
+            city = locationName.city
+            district = locationName.address
+            if !usesManualCity {
+                currentLocationCity = locationName.city
+                currentLocationAddress = locationName.address
+            }
+        } else if city == "未定位" || city == "正在定位" {
+            city = location == nil ? "未定位" : "当前位置"
+            district = location == nil ? "请开启定位" : "附近街区"
+        }
 
         do {
             let feed = try await ShopFeedAPIClient.fetchHome(
@@ -491,51 +547,25 @@ private struct ServiceHomeView: View {
         }
     }
 
-    private func resolveLocationName(_ location: CLLocation?) async -> (city: String, district: String)? {
-        guard let location else { return nil }
-
-        do {
-            guard let placemark = try await CLGeocoder()
-                .reverseGeocodeLocation(location)
-                .first else {
-                return nil
-            }
-
-            let resolvedCity = placemark.locality
-                ?? placemark.administrativeArea
-                ?? "当前位置"
-            let resolvedDistrict = placemark.subLocality
-                ?? placemark.thoroughfare
-                ?? placemark.name
-                ?? "附近街区"
-            return (resolvedCity, resolvedDistrict)
-        } catch {
-            return nil
-        }
-    }
-
-    private func applyCitySelection(_ selection: CityOption?) {
-        if let selection {
+    private func applyCitySelection(_ selection: CitySelectionResult) {
+        switch selection {
+        case .manual(let selection):
             usesManualCity = true
             manualCityName = selection.name
             manualCityLatitude = selection.latitude
             manualCityLongitude = selection.longitude
             city = selection.name
             district = "手动选择"
-        } else {
+
+        case .current(let selection):
             usesManualCity = false
             manualCityName = ""
             manualCityLatitude = 0
             manualCityLongitude = 0
-
-            if locationProvider.authorizationStatus == .denied
-                || locationProvider.authorizationStatus == .restricted {
-                isShowingLocationPermissionAlert = true
-                return
-            }
-
-            city = "正在定位"
-            district = "当前位置"
+            city = selection.name
+            district = selection.address ?? "当前位置"
+            currentLocationCity = selection.name
+            currentLocationAddress = selection.address ?? "当前位置"
         }
 
         Task {
@@ -553,6 +583,14 @@ struct CityOption: Identifiable, Hashable {
     let name: String
     let latitude: Double
     let longitude: Double
+    let address: String?
+
+    init(name: String, latitude: Double, longitude: Double, address: String? = nil) {
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+        self.address = address
+    }
 
     var id: String { name }
 
@@ -568,14 +606,37 @@ struct CityOption: Identifiable, Hashable {
     }
 }
 
+private enum CitySelectionResult {
+    case current(CityOption)
+    case manual(CityOption)
+}
+
 private struct CitySelectionView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var locationProvider: LocationProvider
     let selectedCityName: String
-    let onSelect: (CityOption?) -> Void
+    let onSelect: (CitySelectionResult) -> Void
 
     @State private var searchText = ""
     @State private var isGeocoding = false
     @State private var geocodingMessage: String?
+    @State private var currentCityName: String
+    @State private var currentAddress: String
+    @State private var currentLocationOption: CityOption?
+    @State private var isLocatingCurrentCity = false
+    @State private var isShowingLocationPermissionAlert = false
+
+    init(
+        selectedCityName: String,
+        initialCurrentCity: String,
+        initialCurrentAddress: String,
+        onSelect: @escaping (CitySelectionResult) -> Void
+    ) {
+        self.selectedCityName = selectedCityName
+        self.onSelect = onSelect
+        _currentCityName = State(initialValue: initialCurrentCity)
+        _currentAddress = State(initialValue: initialCurrentAddress)
+    }
 
     private let popularCityNames = ["北京", "上海", "广州", "深圳", "成都", "杭州", "重庆", "石家庄"]
 
@@ -604,20 +665,43 @@ private struct CitySelectionView: View {
         ScrollViewReader { proxy in
             List {
                 Section("当前城市") {
-                    Button {
-                        onSelect(nil)
-                        dismiss()
-                    } label: {
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 12) {
                             Image(systemName: "location.fill")
                                 .foregroundStyle(ProfilePalette.systemBlue)
-                            Text(selectedCityName)
-                                .foregroundStyle(ProfilePalette.label)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(currentCityName.isEmpty ? "正在定位" : currentCityName)
+                                    .font(.headline)
+                                    .foregroundStyle(ProfilePalette.label)
+                                Text(currentAddress.isEmpty ? "正在获取详细地址" : currentAddress)
+                                    .font(.footnote)
+                                    .foregroundStyle(ProfilePalette.secondaryLabel)
+                                    .lineLimit(2)
+                            }
+
                             Spacer()
-                            Text("重新定位")
-                                .foregroundStyle(ProfilePalette.systemBlue)
+
+                            if isLocatingCurrentCity {
+                                ProgressView()
+                            }
+                        }
+
+                        HStack(spacing: 12) {
+                            Button("使用当前位置") {
+                                selectCurrentLocation()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(currentLocationOption == nil || isLocatingCurrentCity)
+
+                            Button("重新定位") {
+                                Task { await refreshCurrentLocation() }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isLocatingCurrentCity)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
 
                 if searchText.isEmpty {
@@ -702,6 +786,19 @@ private struct CitySelectionView: View {
         }
         .navigationTitle("选择城市")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await refreshCurrentLocation()
+        }
+        .alert("定位权限未开启", isPresented: $isShowingLocationPermissionAlert) {
+            if locationProvider.authorizationStatus == .denied {
+                Button("去设置") {
+                    openLocationSettings()
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("开启定位后可自动显示当前城市和详细地址，也可以继续手动选择城市。")
+        }
     }
 
     private func cityGrid(_ cities: [CityOption]) -> some View {
@@ -738,8 +835,61 @@ private struct CitySelectionView: View {
     }
 
     private func select(_ city: CityOption) {
-        onSelect(city)
+        onSelect(.manual(city))
         dismiss()
+    }
+
+    private func selectCurrentLocation() {
+        guard let currentLocationOption else { return }
+        onSelect(.current(currentLocationOption))
+        dismiss()
+    }
+
+    @MainActor
+    private func refreshCurrentLocation() async {
+        guard !isLocatingCurrentCity else { return }
+
+        locationProvider.requestWhenInUseAuthorization()
+        if locationProvider.authorizationStatus == .notDetermined {
+            for _ in 0..<30 {
+                try? await Task.sleep(for: .milliseconds(100))
+                if locationProvider.authorizationStatus != .notDetermined {
+                    break
+                }
+            }
+        }
+
+        guard locationProvider.authorizationStatus == .authorizedAlways
+                || locationProvider.authorizationStatus == .authorizedWhenInUse else {
+            isShowingLocationPermissionAlert = true
+            return
+        }
+
+        isLocatingCurrentCity = true
+        defer { isLocatingCurrentCity = false }
+
+        guard let location = await locationProvider.currentLocation(timeout: 3),
+              let resolved = await LocationNameResolver.resolve(location) else {
+            if currentCityName.isEmpty {
+                currentCityName = "定位失败"
+                currentAddress = "请点击重新定位"
+            }
+            return
+        }
+
+        currentCityName = resolved.city
+        currentAddress = resolved.address
+        currentLocationOption = CityOption(
+            name: resolved.city,
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            address: resolved.address
+        )
+    }
+
+    private func openLocationSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     @MainActor
