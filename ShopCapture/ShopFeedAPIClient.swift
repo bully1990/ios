@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 enum ShopFeedAPIClient {
@@ -9,11 +8,6 @@ enum ShopFeedAPIClient {
         let approvedRecords = filtered(records, keyword: keyword).filter { $0.isApproved }
         let shops = makeFeedShops(records: approvedRecords, latitude: latitude, longitude: longitude, limit: 8)
         return ShopHomeFeed(
-            city: locationTitle(latitude: latitude, longitude: longitude),
-            district: districtTitle(latitude: latitude, longitude: longitude),
-            coverage: coverageScore(records.count),
-            trustScore: averageTrustScore(shops),
-            services: serviceLabels(from: approvedRecords),
             hotServices: hotServices(from: approvedRecords),
             shops: shops
         )
@@ -40,22 +34,12 @@ enum ShopFeedAPIClient {
 
     static func fetchNearby(latitude: Double?, longitude: Double?, keyword: String = "", service: String = "全部") async throws -> ShopNearbyFeed {
         let query = keyword.isEmpty ? (service == "全部" ? "" : service) : keyword
-        let records = filtered(try await fetchRecords(), keyword: query)
+        let records = filtered(try await fetchRecords(), keyword: query).filter { $0.isApproved }
         let nearby = makeFeedShops(records: records, latitude: latitude, longitude: longitude, limit: 20).map {
-            NearbyFeedShop(shop: $0, centerLatitude: latitude, centerLongitude: longitude)
+            NearbyFeedShop(shop: $0)
         }
-        let trust = averageTrustScore(nearby.map(\.feedShop))
         return ShopNearbyFeed(
-            city: locationTitle(latitude: latitude, longitude: longitude),
-            district: districtTitle(latitude: latitude, longitude: longitude),
-            scopeText: latitude == nil || longitude == nil ? "定位后推荐" : "1.2km 范围",
-            total: nearby.count,
             filters: nearbyFilters(from: records),
-            insights: [
-                FeedInsight(title: "热区", value: districtTitle(latitude: latitude, longitude: longitude), subtitle: "服务密度最高"),
-                FeedInsight(title: "响应", value: "\(max(3, min(18, 12 - nearby.count)))分钟", subtitle: "平均可联系"),
-                FeedInsight(title: "可信", value: trust, subtitle: "均值评分")
-            ],
             shops: nearby
         )
     }
@@ -189,7 +173,7 @@ enum ShopFeedAPIClient {
     static func primaryService(text: String) -> String {
         let separators = CharacterSet(charactersIn: "，,、;；|/\n\r ")
         let parts = text.components(separatedBy: separators)
-        return parts.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "本地服务"
+        return parts.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
     }
 
     static func serviceSymbol(text: String) -> String {
@@ -201,43 +185,11 @@ enum ShopFeedAPIClient {
         return "storefront.fill"
     }
 
-    private static func locationTitle(latitude: Double?, longitude: Double?) -> String {
-        latitude == nil || longitude == nil ? "石家庄市" : "当前位置"
-    }
-
-    private static func districtTitle(latitude: Double?, longitude: Double?) -> String {
-        latitude == nil || longitude == nil ? "建华大街" : "附近街区"
-    }
-
-    private static func coverageScore(_ count: Int) -> String {
-        String(format: "%.1f", min(99.9, 80 + Double(count) * 0.8))
-    }
-
-    private static func averageTrustScore(_ shops: [FeedShop]) -> String {
-        guard !shops.isEmpty else { return "0.0" }
-        let total = shops.reduce(0.0) { $0 + (Double($1.trustScore) ?? 0) }
-        return String(format: "%.1f", total / Double(shops.count))
-    }
 }
 
 struct ShopHomeFeed: Sendable {
-    let city: String
-    let district: String
-    let coverage: String
-    let trustScore: String
-    let services: [String]
     let hotServices: [String]
     let shops: [FeedShop]
-
-    enum CodingKeys: String, CodingKey {
-        case city
-        case district
-        case coverage
-        case trustScore = "trust_score"
-        case services
-        case hotServices = "hot_services"
-        case shops
-    }
 }
 
 struct PagedResult<Item: Sendable>: Sendable {
@@ -247,23 +199,8 @@ struct PagedResult<Item: Sendable>: Sendable {
 }
 
 struct ShopNearbyFeed: Sendable {
-    let city: String
-    let district: String
-    let scopeText: String
-    let total: Int
     let filters: [String]
-    let insights: [FeedInsight]
     let shops: [NearbyFeedShop]
-
-    enum CodingKeys: String, CodingKey {
-        case city
-        case district
-        case scopeText = "scope_text"
-        case total
-        case filters
-        case insights
-        case shops
-    }
 }
 
 struct ShopSearchFeed: Sendable {
@@ -276,14 +213,9 @@ struct FeedShop: Identifiable, Sendable {
     let id: Int
     let rank: Int
     let name: String
-    let category: String
     let service: String
     let details: String
     let distance: String
-    let address: String
-    let rating: String
-    let reviews: String
-    let trustScore: String
     let phone: String
     let symbol: String
     let latitude: Double
@@ -303,15 +235,10 @@ struct FeedShop: Identifiable, Sendable {
 
         self.id = Int(record.id.value) ?? 0
         self.rank = 0
-        self.name = record.shopName.value.isEmpty ? service : record.shopName.value
-        self.category = record.auditStatus.value == "1" ? "已通过核验" : "待审核采集"
+        self.name = record.shopName.value
         self.service = service
         self.details = serviceText.replacingOccurrences(of: "\n", with: " · ")
         self.distance = Self.distanceText(distance)
-        self.address = record.latitude.value == "0.0000000" && record.longitude.value == "0.0000000" ? "位置待补充" : "扫街已定位"
-        self.rating = record.auditStatus.value == "1" ? "4.8" : "4.5"
-        self.reviews = "\(max(1, (Int(record.id.value) ?? 1) % 168))条评价"
-        self.trustScore = String(format: "%.1f", min(99.8, (record.auditStatus.value == "1" ? 96.0 : 91.0) + Double((Int(record.id.value) ?? 0) % 30) / 10.0))
         self.phone = record.phoneNumber.value
         self.symbol = ShopFeedAPIClient.serviceSymbol(text: serviceText)
         self.latitude = Double(record.latitude.value) ?? 0
@@ -324,14 +251,9 @@ struct FeedShop: Identifiable, Sendable {
         id: Int,
         rank: Int,
         name: String,
-        category: String,
         service: String,
         details: String,
         distance: String,
-        address: String,
-        rating: String,
-        reviews: String,
-        trustScore: String,
         phone: String,
         symbol: String,
         latitude: Double,
@@ -342,14 +264,9 @@ struct FeedShop: Identifiable, Sendable {
         self.id = id
         self.rank = rank
         self.name = name
-        self.category = category
         self.service = service
         self.details = details
         self.distance = distance
-        self.address = address
-        self.rating = rating
-        self.reviews = reviews
-        self.trustScore = trustScore
         self.phone = phone
         self.symbol = symbol
         self.latitude = latitude
@@ -363,14 +280,9 @@ struct FeedShop: Identifiable, Sendable {
             id: id,
             rank: rank,
             name: name,
-            category: category,
             service: service,
             details: details,
             distance: distance,
-            address: address,
-            rating: rating,
-            reviews: reviews,
-            trustScore: trustScore,
             phone: phone,
             symbol: symbol,
             latitude: latitude,
@@ -402,14 +314,9 @@ struct FeedShop: Identifiable, Sendable {
             id: "\(id)",
             rank: rank > 0 ? rank : fallbackRank,
             name: name,
-            category: category,
             service: service,
             details: details,
             distance: distance,
-            address: address,
-            rating: rating,
-            reviews: reviews,
-            trustScore: trustScore,
             phone: phone,
             symbol: symbol,
             imageURL: imageURL
@@ -422,34 +329,19 @@ struct NearbyFeedShop: Identifiable, Sendable {
     let name: String
     let service: String
     let distance: String
-    let eta: String
-    let score: String
-    let status: String
-    let address: String
-    let tags: [String]
     let symbol: String
     let latitude: Double
     let longitude: Double
-    let coordinate: FeedCoordinate
     let feedShop: FeedShop
 
-    init(shop: FeedShop, centerLatitude: Double?, centerLongitude: Double?) {
+    init(shop: FeedShop) {
         self.id = shop.id
         self.name = shop.name
         self.service = shop.service
         self.distance = shop.distance
-        self.eta = Self.etaText(distanceMeters: shop.distanceMeters)
-        self.score = shop.trustScore
-        self.status = Self.statusText()
-        self.address = shop.address
-        self.tags = Array([shop.phone.isEmpty ? "" : "电话已核验", shop.imageURL.isEmpty ? "" : "门头已采集", "近期更新"].filter { !$0.isEmpty }.prefix(2))
         self.symbol = shop.symbol
         self.latitude = shop.latitude
         self.longitude = shop.longitude
-        self.coordinate = FeedCoordinate(
-            x: Self.mapCoordinate(value: shop.longitude, center: centerLongitude),
-            y: 1 - Self.mapCoordinate(value: shop.latitude, center: centerLatitude)
-        )
         self.feedShop = shop
     }
 
@@ -459,46 +351,10 @@ struct NearbyFeedShop: Identifiable, Sendable {
             name: name,
             service: service,
             distance: distance,
-            eta: eta,
-            score: score,
-            status: status,
-            address: address,
-            tags: tags,
             symbol: symbol,
-            imageURL: feedShop.imageURL,
-            coordinate: CGPoint(x: coordinate.x, y: coordinate.y)
+            imageURL: feedShop.imageURL
         )
     }
-
-    private static func etaText(distanceMeters: Double) -> String {
-        guard distanceMeters < 999_999_999 else { return "距离待确认" }
-        return "步行 \(max(1, Int(ceil(distanceMeters / 80)))) 分钟"
-    }
-
-    private static func statusText() -> String {
-        let hour = Calendar.current.component(.hour, from: Date())
-        return (9...21).contains(hour) ? "营业中" : "可预约"
-    }
-
-    private static func mapCoordinate(value: Double, center: Double?) -> Double {
-        guard let center, value != 0, center != 0 else {
-            let seed = abs(Int(value * 1000))
-            return 0.25 + Double(seed % 50) / 100
-        }
-        return 0.5 + max(-0.38, min(0.38, (value - center) * 80))
-    }
-}
-
-struct FeedInsight: Identifiable, Sendable {
-    var id: String { "\(title)-\(value)" }
-    let title: String
-    let value: String
-    let subtitle: String
-}
-
-struct FeedCoordinate: Sendable {
-    let x: Double
-    let y: Double
 }
 
 enum StreetReviewState: String, CaseIterable, Sendable {

@@ -62,13 +62,7 @@ enum ShopRecordStore {
             timestamp: payload.timestamp
         )
 
-        Task.detached {
-            do {
-                try await ShopCaptureAPIClient.upload(uploadPayload)
-            } catch {
-                print("Warning: failed to upload shop record: \(error.localizedDescription)")
-            }
-        }
+        try await ShopCaptureAPIClient.upload(uploadPayload)
     }
 
     private static func apply(_ payload: CapturedShopPayload, imagePath: String, to record: NSManagedObject) {

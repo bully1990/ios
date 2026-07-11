@@ -3,6 +3,8 @@ import SwiftUI
 import UIKit
 
 struct CameraCaptureView: View {
+    let onClose: () -> Void
+
     private enum RecognitionMode: String, CaseIterable, Identifiable {
         case manual = "拍照识别"
         case automatic = "自动识别"
@@ -60,9 +62,36 @@ struct CameraCaptureView: View {
                 let width = proxy.size.width * guide.width
                 let height = proxy.size.height * guide.height
 
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(processor.isRecognizing ? .white.opacity(0.82) : .white.opacity(0.35), lineWidth: 2)
-                    .frame(width: width, height: height)
+                ZStack {
+                    if let capturedPreviewImage = processor.capturedPreviewImage {
+                        Image(uiImage: capturedPreviewImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: width, height: height)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(processor.isRecognizing ? .white.opacity(0.82) : .white.opacity(0.35), lineWidth: 2)
+
+                    if processor.capturedPreviewImage != nil {
+                        TimelineView(.animation) { timeline in
+                            let progress = timeline.date.timeIntervalSinceReferenceDate
+                                .truncatingRemainder(dividingBy: 1.6) / 1.6
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(
+                                    AngularGradient(
+                                        colors: [.cyan, .blue, .purple, .pink, .orange, .cyan],
+                                        center: .center,
+                                        angle: .degrees(progress * 360)
+                                    ),
+                                    lineWidth: 4
+                                )
+                                .shadow(color: .cyan.opacity(0.45), radius: 8)
+                        }
+                    }
+                }
+                .frame(width: width, height: height)
                     .position(x: proxy.size.width * guide.midX, y: proxy.size.height * guide.midY)
                     .shadow(color: .black.opacity(0.32), radius: 8)
                     .onAppear {
@@ -172,6 +201,14 @@ struct CameraCaptureView: View {
                 .accessibilityLabel("从相册选择")
 
                 Spacer()
+
+                Button {
+                    processor.stop()
+                    onClose()
+                } label: {
+                    toolbarIcon("xmark")
+                }
+                .accessibilityLabel("关闭扫街")
             }
 
             Button {
@@ -211,19 +248,6 @@ struct CameraCaptureView: View {
             if processor.isRecognizing {
                 if recognitionMode == .manual {
                     manualActionButtons
-                } else {
-                    Button {
-                        toggleRecognition()
-                    } label: {
-                        Label("停止自动识别", systemImage: "stop.fill")
-                            .font(actionButtonFont)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, actionButtonVerticalPadding)
-                            .background(.red.opacity(0.9))
-                            .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
-                    }
-                    .accessibilityLabel("停止自动识别")
                 }
             } else {
                 Button {
@@ -294,68 +318,36 @@ struct CameraCaptureView: View {
 
     private var landscapeSideActionButtons: some View {
         VStack(spacing: 26) {
-            if processor.isRecognizing {
+            if processor.isRecognizing, recognitionMode == .manual {
                 Button {
-                    toggleRecognition()
+                    processor.captureCurrentFrame()
                 } label: {
-                    Text("停止")
+                    Text("拍照")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.black)
                         .frame(maxWidth: .infinity)
                         .frame(height: 60)
-                        .background(.red.opacity(0.9))
+                        .background(.white.opacity(0.95))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-                .accessibilityLabel("停止识别")
-
-                if recognitionMode == .manual {
-                    Button {
-                        processor.captureCurrentFrame()
-                    } label: {
-                        Text("拍照")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 60)
-                            .background(.white.opacity(0.95))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .accessibilityLabel("拍照")
-                }
+                .accessibilityLabel("拍照")
             }
         }
     }
 
     private var manualActionButtons: some View {
-        let stack = isLandscapeLayout ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 12))
-
-        return stack {
-            Button {
-                toggleRecognition()
-            } label: {
-                Label("停止", systemImage: "stop.fill")
-                    .font(actionButtonFont)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, actionButtonVerticalPadding)
-                    .background(.red.opacity(0.9))
-                    .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
-            }
-            .accessibilityLabel("停止识别")
-
-            Button {
-                processor.captureCurrentFrame()
-            } label: {
-                Label("拍照", systemImage: "camera.fill")
-                    .font(actionButtonFont)
-                    .foregroundStyle(.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, actionButtonVerticalPadding)
-                    .background(.white.opacity(0.95))
-                    .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
-            }
-            .accessibilityLabel("拍照")
+        Button {
+            processor.captureCurrentFrame()
+        } label: {
+            Label("拍照", systemImage: "camera.fill")
+                .font(actionButtonFont)
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, actionButtonVerticalPadding)
+                .background(.white.opacity(0.95))
+                .clipShape(RoundedRectangle(cornerRadius: actionButtonCornerRadius, style: .continuous))
         }
+        .accessibilityLabel("拍照")
     }
 
     private var zoomResetStrip: some View {

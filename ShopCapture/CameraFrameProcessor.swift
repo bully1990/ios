@@ -20,7 +20,8 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private enum Constants {
         static let frameProcessingInterval = 2
         static let requiredStableDetections = 1
-        static let automaticCaptureDelay: TimeInterval = 3
+        static let automaticCaptureDelay: TimeInterval = 1
+        static let automaticDetectionGracePeriod: TimeInterval = 1
         static let maximumZoomFactor: CGFloat = 6
     }
 
@@ -47,6 +48,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     }
     @Published private(set) var isRecognizing = false
     @Published private(set) var zoomFactor: CGFloat = 1
+    @Published private(set) var capturedPreviewImage: UIImage?
 
     weak var delegate: CameraFrameProcessorDelegate?
 
@@ -58,7 +60,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
     private var frameIndex = 0
     private var isVisionBusy = false
     private var state: CaptureState = .idle
-    private var stablePhoneNumber: String?
+    private var stablePhoneNumberKey: String?
     private var stableCount = 0
     private var pendingAutomaticPhoneNumberKey: String?
     private var pendingAutomaticCaptureDeadline: Date?
@@ -84,6 +86,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
         Task { @MainActor in
             self.isRecognizing = true
+            self.capturedPreviewImage = nil
             self.message = "正在开启摄像头"
         }
 
@@ -129,6 +132,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
         Task { @MainActor in
             self.isRecognizing = false
+            self.capturedPreviewImage = nil
             self.message = nil
         }
 
@@ -240,6 +244,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         resetStability()
 
         Task { @MainActor in
+            capturedPreviewImage = nil
             message = "已保存"
 
             try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -253,6 +258,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         print("Warning: failed to save record: \(error.localizedDescription)")
         state = .idle
         resetStability()
+        capturedPreviewImage = nil
         message = "保存失败"
     }
 
@@ -405,6 +411,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
             let detectedFrame = DetectedShopFrame(image: croppedImage, fullText: "", phoneNumber: "")
 
             Task { @MainActor in
+                capturedPreviewImage = croppedImage
                 message = "已拍照，正在用 AI 识别"
                 delegate?.cameraFrameProcessor(self, didDetect: detectedFrame)
             }
@@ -466,6 +473,16 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
 
         let phoneNumbers = PhoneNumberExtractor.allPhoneNumbers(in: fullText)
         guard !phoneNumbers.isEmpty else {
+            if mode == .automatic, let deadline = pendingAutomaticCaptureDeadline {
+                if Date() < deadline.addingTimeInterval(Constants.automaticDetectionGracePeriod) {
+                    return
+                }
+                resetStability()
+                Task { @MainActor in
+                    message = "正在自动识别门头"
+                }
+                return
+            }
             resetStability()
             if mode == .manual {
                 Task { @MainActor in
@@ -488,10 +505,10 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                 return
             }
 
-            if stablePhoneNumber == phoneNumber {
+            if stablePhoneNumberKey == phoneNumberKey {
                 stableCount += 1
             } else {
-                stablePhoneNumber = phoneNumber
+                stablePhoneNumberKey = phoneNumberKey
                 stableCount = 1
                 pendingAutomaticPhoneNumberKey = nil
                 pendingAutomaticCaptureDeadline = nil
@@ -509,7 +526,7 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
                 pendingAutomaticPhoneNumberKey = phoneNumberKey
                 pendingAutomaticCaptureDeadline = now.addingTimeInterval(Constants.automaticCaptureDelay)
                 Task { @MainActor in
-                    message = "已识别到电话，请保持画面 3 秒"
+                    message = "已识别到电话，请保持画面 1 秒"
                 }
                 return
             }
@@ -539,13 +556,14 @@ final class CameraFrameProcessor: NSObject, ObservableObject {
         let detectedFrame = DetectedShopFrame(image: image, fullText: prioritizedText, phoneNumber: phoneNumber)
 
         Task { @MainActor in
+            capturedPreviewImage = image
             message = mode == .manual ? "拍照识别成功，正在保存" : "正在保存"
             delegate?.cameraFrameProcessor(self, didDetect: detectedFrame)
         }
     }
 
     private func resetStability() {
-        stablePhoneNumber = nil
+        stablePhoneNumberKey = nil
         stableCount = 0
         pendingAutomaticPhoneNumberKey = nil
         pendingAutomaticCaptureDeadline = nil

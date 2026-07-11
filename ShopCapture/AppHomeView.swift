@@ -158,10 +158,8 @@ private struct ServiceHomeView: View {
     @AppStorage("shopcapture.manualCityLongitude") private var manualCityLongitude = 0.0
     @State private var shops: [RecommendedShop] = []
     @State private var hotSearches: [String] = []
-    @State private var city = "石家庄市"
-    @State private var district = "建华大街"
-    @State private var coverage = "98.6"
-    @State private var trustScore = "98.6"
+    @State private var city = "未定位"
+    @State private var district = "请开启定位"
     @State private var searchText = ""
     @State private var hasLoadedHome = false
     @State private var isReloading = false
@@ -178,7 +176,6 @@ private struct ServiceHomeView: View {
                         header
                         searchHero
                         recommendationSection
-                        trustStrip
                         nearbyHotSearches
                     }
                     .padding(.horizontal, 18)
@@ -370,19 +367,6 @@ private struct ServiceHomeView: View {
         }
     }
 
-    private var trustStrip: some View {
-        HStack(spacing: 0) {
-            TrustItem(symbol: "checkmark.shield.fill", title: "评价可信分", subtitle: "真实评价多维计算")
-            Divider().frame(height: 42)
-            TrustItem(symbol: "phone.fill", title: "电话已核验", subtitle: "人工核验真实性")
-            Divider().frame(height: 42)
-            TrustItem(symbol: "clock.fill", title: "近期有更新", subtitle: "确保信息不过期")
-        }
-        .padding(.vertical, 14)
-        .background(.white.opacity(0.86))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-
     private var nearbyHotSearches: some View {
         Group {
             if !hotSearches.isEmpty {
@@ -466,10 +450,8 @@ private struct ServiceHomeView: View {
                 longitude: location?.coordinate.longitude,
                 keyword: keyword
             )
-            city = locationName?.city ?? (location == nil ? "未定位" : feed.city)
-            district = locationName?.district ?? (location == nil ? "请开启定位" : feed.district)
-            coverage = feed.coverage
-            trustScore = feed.trustScore
+            city = locationName?.city ?? (location == nil ? "未定位" : "当前位置")
+            district = locationName?.district ?? (location == nil ? "请开启定位" : "附近街区")
             hotSearches = feed.hotServices
             let mappedShops = feed.shops.enumerated().map { index, shop in
                 shop.recommendedShop(fallbackRank: index + 1)
@@ -885,25 +867,9 @@ private struct RecommendedShopRow: View {
                             .foregroundStyle(DesignTokens.ink)
                             .lineLimit(1)
 
-                        Text(shop.category)
-                            .font(.caption)
-                            .foregroundStyle(DesignTokens.secondaryText)
                     }
 
                     Spacer()
-
-                    VStack(spacing: 2) {
-                        Text("可信分")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(DesignTokens.emerald)
-                        Text(shop.trustScore)
-                            .font(.title3.weight(.black))
-                            .foregroundStyle(DesignTokens.emerald)
-                    }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 7)
-                    .background(DesignTokens.softEmerald)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
 
                 HStack(spacing: 8) {
@@ -921,24 +887,16 @@ private struct RecommendedShopRow: View {
                         .lineLimit(1)
                 }
 
-                Text("距您 \(shop.distance)  |  \(shop.address)")
+                Text("距您 \(shop.distance)")
                     .font(.caption)
                     .foregroundStyle(DesignTokens.secondaryText)
                     .lineLimit(1)
 
-                HStack(spacing: 8) {
-                    Label(shop.rating, systemImage: "star.fill")
-                        .foregroundStyle(DesignTokens.emerald)
-                    Text(shop.reviews)
-                    Label("电话已核验", systemImage: "phone.circle")
-                    Spacer()
+                if !shop.phone.isEmpty {
+                    Label(shop.phone, systemImage: "phone.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(DesignTokens.ink)
                 }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(DesignTokens.secondaryText)
-
-                Label(shop.phone, systemImage: "phone.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(DesignTokens.ink)
             }
 
             if showsDisclosureIndicator {
@@ -1114,16 +1072,11 @@ private struct RecommendedShopDetailView: View {
 
             Section("店铺信息") {
                 detailRow("名称", shop.name)
-                detailRow("分类", shop.category)
-                detailRow("可信分", shop.trustScore)
-                detailRow("评分", shop.rating)
-                detailRow("评价", shop.reviews)
             }
 
             Section("服务与位置") {
                 detailRow("服务", shop.service)
                 detailRow("详情", shop.details)
-                detailRow("地址", shop.address)
                 detailRow("距离", shop.distance)
                 detailRow("电话", shop.phone)
             }
@@ -1172,40 +1125,15 @@ private struct ShopPhoto: View {
     }
 }
 
-private struct TrustItem: View {
-    let symbol: String
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: symbol)
-                .font(.title3)
-                .foregroundStyle(DesignTokens.emerald)
-            Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(DesignTokens.emerald)
-                .lineLimit(1)
-            Text(subtitle)
-                .font(.caption2)
-                .foregroundStyle(DesignTokens.secondaryText)
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
 private struct NearbyDiscoveryView: View {
     @EnvironmentObject private var locationProvider: LocationProvider
     @State private var filters = NearbyDiscoveryView.defaultFilters
     @State private var selectedFilter = "全部"
     @State private var nearbyShops: [NearbyShop] = []
-    @State private var insights: [FeedInsight] = []
-    @State private var district = "建华大街"
-    @State private var scopeText = "1.2km 范围"
-    @State private var total = 268
+    @State private var district = "未定位"
+    @State private var scopeText = "定位后展示距离"
 
-    private static let defaultFilters = ["全部", "维修", "餐饮", "生活服务", "24小时"]
+    private static let defaultFilters = ["全部"]
     var body: some View {
         NavigationStack {
             ZStack {
@@ -1215,7 +1143,6 @@ private struct NearbyDiscoveryView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         header
                         filterBar
-                        insightStrip
                         recommendedNearby
                     }
                     .padding(.horizontal, 18)
@@ -1291,18 +1218,6 @@ private struct NearbyDiscoveryView: View {
         }
     }
 
-    private var insightStrip: some View {
-        Group {
-            if !insights.isEmpty {
-                HStack(spacing: 10) {
-                    ForEach(insights.prefix(3)) { insight in
-                        DiscoveryInsightCard(title: insight.title, value: insight.value, subtitle: insight.subtitle)
-                    }
-                }
-            }
-        }
-    }
-
     private var recommendedNearby: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -1312,7 +1227,7 @@ private struct NearbyDiscoveryView: View {
 
                 Spacer()
 
-                Text("按距离和可信分排序")
+                Text("按距离排序")
                     .font(.caption)
                     .foregroundStyle(DesignTokens.secondaryText)
             }
@@ -1348,18 +1263,14 @@ private struct NearbyDiscoveryView: View {
                 longitude: location?.coordinate.longitude,
                 service: service ?? selectedFilter
             )
-            district = feed.district
-            scopeText = feed.scopeText
-            total = feed.total
+            district = location == nil ? "未定位" : "当前位置"
+            scopeText = location == nil ? "定位后展示距离" : "已获取当前位置"
             filters = feed.filters.isEmpty ? Self.defaultFilters : feed.filters
-            insights = feed.insights
             let mappedShops = feed.shops.map { $0.nearbyShop() }
             nearbyShops = mappedShops
         } catch {
             filters = Self.defaultFilters
-            insights = []
             nearbyShops = []
-            total = 0
         }
     }
 }
@@ -1368,11 +1279,10 @@ private struct StreetPageState {
     var records: [StreetReviewRecord] = []
     var nextPage = 1
     var hasMoreServerRecords = true
-    var hasMoreLocalRecords = false
     var loadedServerKeys: Set<String> = []
 
     var hasMore: Bool {
-        hasMoreServerRecords || hasMoreLocalRecords
+        hasMoreServerRecords
     }
 }
 
@@ -1382,14 +1292,8 @@ private struct StreetVerifyTaskView: View {
     @State private var isReloading = false
     @State private var hasLoadedRecords = false
     @State private var pageStates: [StreetRecordStatus: StreetPageState] = [:]
-    @State private var localPendingRecords: [StreetReviewRecord] = []
     @State private var loadErrorMessage: String?
     @State private var loadingStatus: StreetRecordStatus?
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \ShopRecord.timestamp, ascending: false)],
-        animation: .default
-    )
-    private var records: FetchedResults<ShopRecord>
 
     private var selectedRecords: [StreetReviewRecord] {
         pageStates[selectedStatus]?.records ?? []
@@ -1483,20 +1387,8 @@ private struct StreetVerifyTaskView: View {
                 .background(.regularMaterial)
             }
             .fullScreenCover(isPresented: $isShowingCapture) {
-                ZStack(alignment: .topTrailing) {
-                    CameraCaptureView()
-                    Button {
-                        isShowingCapture = false
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.headline.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.black.opacity(0.42))
-                            .clipShape(Circle())
-                    }
-                    .padding(.trailing, 18)
-                    .padding(.top, 18)
+                CameraCaptureView {
+                    isShowingCapture = false
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .streetTabDoubleTapped)) { _ in
@@ -1520,7 +1412,6 @@ private struct StreetVerifyTaskView: View {
         defer { isReloading = false }
 
         pageStates = [:]
-        localPendingRecords = Array(records).map(localReviewRecord)
         loadErrorMessage = nil
 
         for status in [StreetRecordStatus.approved, .rejected, .pending] {
@@ -1563,21 +1454,12 @@ private struct StreetVerifyTaskView: View {
                 scannedPages += 1
             }
 
-            if status == .pending, state.records.count < targetCount {
-                appendLocalPendingRecords(to: &state, targetCount: targetCount)
-            } else if status == .pending {
-                updateLocalPendingAvailability(in: &state)
-            }
-
             pageStates[status] = state
             loadErrorMessage = nil
         } catch {
-            if status == .pending {
-                appendLocalPendingRecords(to: &state, targetCount: targetCount)
-            }
             pageStates[status] = state
             loadErrorMessage = state.nextPage == 1
-                ? "接口加载失败，当前显示本机待审核记录"
+                ? "接口加载失败，请稍后重试"
                 : "更多记录加载失败，请稍后重试"
         }
     }
@@ -1598,49 +1480,11 @@ private struct StreetVerifyTaskView: View {
         }
     }
 
-    private func appendLocalPendingRecords(to state: inout StreetPageState, targetCount: Int) {
-        let serverKeys = Set(pageStates.values.flatMap { $0.loadedServerKeys }).union(state.loadedServerKeys)
-        let existingKeys = Set(state.records.map(streetRecordKey))
-        let availableRecords = localPendingRecords.filter { record in
-            let key = streetRecordKey(record)
-            return !serverKeys.contains(key) && !existingKeys.contains(key)
-        }
-        let neededCount = max(0, targetCount - state.records.count)
-        state.records = mergeStreetRecords(state.records, with: Array(availableRecords.prefix(neededCount)))
-        state.hasMoreLocalRecords = availableRecords.count > neededCount
-    }
-
-    private func updateLocalPendingAvailability(in state: inout StreetPageState) {
-        let serverKeys = Set(pageStates.values.flatMap { $0.loadedServerKeys }).union(state.loadedServerKeys)
-        let existingKeys = Set(state.records.map(streetRecordKey))
-        state.hasMoreLocalRecords = localPendingRecords.contains { record in
-            let key = streetRecordKey(record)
-            return !serverKeys.contains(key) && !existingKeys.contains(key)
-        }
-    }
-
     private func streetRecordKey(_ record: StreetReviewRecord) -> String {
         if !record.clientUUID.isEmpty {
             return "uuid:\(record.clientUUID.lowercased())"
         }
         return "id:\(record.id)"
-    }
-
-    private func localReviewRecord(_ record: ShopRecord) -> StreetReviewRecord {
-        let clientUUID = record.id?.uuidString ?? ""
-        return StreetReviewRecord(
-            id: clientUUID.isEmpty ? record.objectID.uriRepresentation().absoluteString : clientUUID,
-            clientUUID: clientUUID,
-            shopName: record.shopName ?? "",
-            serviceContent: record.serviceContent ?? "",
-            phoneNumber: record.phoneNumber ?? "",
-            fullText: record.fullText ?? "",
-            imageURL: record.imagePath ?? "",
-            latitude: record.latitude,
-            longitude: record.longitude,
-            capturedAt: record.timestamp,
-            reviewState: .pending
-        )
     }
 
     private func count(for status: StreetRecordStatus) -> Int {
@@ -2284,39 +2128,6 @@ private struct ProfileInfoRow: View {
     }
 }
 
-private struct DiscoveryInsightCard: View {
-    let title: String
-    let value: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(DesignTokens.secondaryText)
-
-            Text(value)
-                .font(.headline.weight(.black))
-                .foregroundStyle(DesignTokens.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-
-            Text(subtitle)
-                .font(.caption2)
-                .foregroundStyle(DesignTokens.secondaryText)
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(DesignTokens.line, lineWidth: 1)
-        )
-    }
-}
-
 private struct NearbyShopCard: View {
     let shop: NearbyShop
 
@@ -2341,42 +2152,15 @@ private struct NearbyShopCard: View {
 
                     Spacer()
 
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(shop.score)
-                            .font(.title3.weight(.black))
-                            .foregroundStyle(DesignTokens.emerald)
-                        Text("可信分")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(DesignTokens.secondaryText)
-                    }
                 }
 
                 HStack(spacing: 8) {
                     Label(shop.distance, systemImage: "location.fill")
-                    Label(shop.eta, systemImage: "figure.walk")
-                    Text(shop.status)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(DesignTokens.emerald)
                 }
                 .font(.caption.weight(.medium))
                 .foregroundStyle(DesignTokens.secondaryText)
 
-                Text(shop.address)
-                    .font(.caption)
-                    .foregroundStyle(DesignTokens.secondaryText)
-                    .lineLimit(1)
-
                 HStack(spacing: 8) {
-                    ForEach(shop.tags, id: \.self) { tag in
-                        Text(tag)
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(DesignTokens.emerald)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(DesignTokens.softEmerald)
-                            .clipShape(Capsule())
-                    }
-
                     Spacer()
 
                     Image(systemName: "chevron.right")
@@ -2690,14 +2474,9 @@ struct RecommendedShop: Identifiable {
     let id: String
     let rank: Int
     let name: String
-    let category: String
     let service: String
     let details: String
     let distance: String
-    let address: String
-    let rating: String
-    let reviews: String
-    let trustScore: String
     let phone: String
     let symbol: String
     let imageURL: String
@@ -2708,14 +2487,8 @@ struct NearbyShop: Identifiable {
     let name: String
     let service: String
     let distance: String
-    let eta: String
-    let score: String
-    let status: String
-    let address: String
-    let tags: [String]
     let symbol: String
     let imageURL: String
-    let coordinate: CGPoint
 }
 
 private enum ProfilePalette {

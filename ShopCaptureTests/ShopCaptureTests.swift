@@ -155,6 +155,10 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(StreetReviewState.allCases.map(\.apiValue), ["0", "1", "2"])
     }
 
+    func testEmptyServiceTextDoesNotCreateFallbackData() {
+        XCTAssertEqual(ShopFeedAPIClient.primaryService(text: ""), "")
+    }
+
     func testCityOptionBuildsPinyinInitial() {
         let city = CityOption(name: "石家庄", latitude: 38.04, longitude: 114.51)
 
