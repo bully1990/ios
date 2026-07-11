@@ -103,7 +103,7 @@ enum ShopFeedAPIClient {
             throw URLError(.badServerResponse)
         }
 
-        let envelope = try JSONDecoder().decode(APIEnvelope<[ShopCaptureRecord]>.self, from: data)
+        let envelope = try JSONDecoder().decode(ShopFeedAPIEnvelope<[ShopCaptureRecord]>.self, from: data)
         guard envelope.normalizedCode == 200 else {
             throw URLError(.cannotParseResponse)
         }
@@ -426,10 +426,10 @@ struct StreetReviewRecord: Identifiable, Sendable {
     let reviewState: StreetReviewState
 }
 
-struct APIEnvelope<T: Decodable>: Decodable {
-    let code: FlexibleInt
+struct ShopFeedAPIEnvelope<T: Decodable>: Decodable {
+    let code: ShopFeedFlexibleInt
     let data: T
-    let total: FlexibleInt?
+    let total: ShopFeedFlexibleInt?
 
     var normalizedCode: Int {
         code.value
@@ -512,7 +512,7 @@ private struct ShopCaptureRecord: Decodable, Sendable {
     }
 }
 
-struct FlexibleInt: Decodable {
+struct ShopFeedFlexibleInt: Decodable {
     let value: Int
 
     init(from decoder: Decoder) throws {

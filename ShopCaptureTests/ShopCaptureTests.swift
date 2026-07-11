@@ -151,7 +151,7 @@ final class ShopCaptureTests: XCTestCase {
 
     func testRecordListEnvelopeDecodesStringTotal() throws {
         let data = Data(#"{"code":200,"data":[],"total":"43"}"#.utf8)
-        let envelope = try JSONDecoder().decode(APIEnvelope<[String]>.self, from: data)
+        let envelope = try JSONDecoder().decode(ShopFeedAPIEnvelope<[String]>.self, from: data)
 
         XCTAssertEqual(envelope.normalizedCode, 200)
         XCTAssertEqual(envelope.total?.value, 43)
