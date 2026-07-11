@@ -122,6 +122,7 @@ enum ShopFeedAPIClient {
         request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        UserAPIClient.applyAuthentication(to: &request)
         request.httpBody = try JSONEncoder().encode(payload)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -157,6 +158,7 @@ enum ShopFeedAPIClient {
         request.timeoutInterval = 20
         request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        UserAPIClient.applyAuthentication(to: &request)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
@@ -181,6 +183,7 @@ enum ShopFeedAPIClient {
         request.timeoutInterval = 20
         request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        UserAPIClient.applyAuthentication(to: &request)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,

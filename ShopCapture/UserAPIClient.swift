@@ -32,6 +32,7 @@ struct UserAccountSummary: Sendable {
 
 enum UserAPIClient {
     private static let baseURL = URL(string: "https://api.gmpebr.com/index.php")!
+    private static let authTokenStore = ShopCaptureAuthTokenStore()
 
     static func login(username: String, password: String, siteID: Int = 1) async throws -> UserProfileSummary {
         var request = URLRequest(url: endpoint(action: "ajax_login"))
@@ -70,6 +71,8 @@ enum UserAPIClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 15
         request.httpShouldHandleCookies = true
+        applyAuthentication(to: &request)
+        defer { authTokenStore.value = "" }
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode) else {
@@ -83,6 +86,7 @@ enum UserAPIClient {
         request.timeoutInterval = 15
         request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        applyAuthentication(to: &request)
         return try await send(request)
     }
 
@@ -92,6 +96,7 @@ enum UserAPIClient {
         request.timeoutInterval = 15
         request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        applyAuthentication(to: &request)
 
         let data = try await sendData(request)
         return UserAccountSummary(data: data)
@@ -104,6 +109,7 @@ enum UserAPIClient {
         request.httpShouldHandleCookies = true
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        applyAuthentication(to: &request)
         request.httpBody = formBody([
             "alipay_account": account,
             "alipay_name": name
@@ -120,6 +126,7 @@ enum UserAPIClient {
         request.httpShouldHandleCookies = true
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        applyAuthentication(to: &request)
         request.httpBody = formBody([
             "coins": "\(coins)",
             "alipay_account": alipayAccount,
@@ -137,6 +144,12 @@ enum UserAPIClient {
             URLQueryItem(name: "a", value: action)
         ]
         return components.url!
+    }
+
+    static func applyAuthentication(to request: inout URLRequest) {
+        let token = authTokenStore.value
+        guard !token.isEmpty else { return }
+        request.setValue(token, forHTTPHeaderField: "Token")
     }
 
     private static func send(_ request: URLRequest) async throws -> UserProfileSummary {
@@ -157,7 +170,13 @@ enum UserAPIClient {
             throw URLError(.cannotParseResponse)
         }
 
-        return envelope["data"] as? [String: Any] ?? [:]
+        let payload = envelope["data"] as? [String: Any] ?? [:]
+        if let token = payload["token"] as? String, !token.isEmpty {
+            authTokenStore.value = token
+        } else if let token = payload["token"] as? NSNumber {
+            authTokenStore.value = token.stringValue
+        }
+        return payload
     }
 
     private static func responseCode(from value: Any?) -> Int {
@@ -183,6 +202,24 @@ enum UserAPIClient {
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: "&+=?")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+}
+
+private final class ShopCaptureAuthTokenStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue = ""
+
+    var value: String {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedValue
+        }
+        set {
+            lock.lock()
+            storedValue = newValue
+            lock.unlock()
+        }
     }
 }
 
