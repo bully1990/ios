@@ -291,7 +291,7 @@ private struct ServiceHomeView: View {
     private var header: some View {
         HStack {
             NavigationLink {
-                CitySelectionView(
+                LinkedCitySelectionView(
                     selectedCityName: city,
                     initialCurrentCity: currentLocationCity.isEmpty ? city : currentLocationCity,
                     initialCurrentAddress: currentLocationAddress.isEmpty ? district : currentLocationAddress
@@ -555,7 +555,7 @@ private struct ServiceHomeView: View {
             manualCityLatitude = selection.latitude
             manualCityLongitude = selection.longitude
             city = selection.name
-            district = "手动选择"
+            district = selection.address ?? "手动选择"
 
         case .current(let selection):
             usesManualCity = false
@@ -606,7 +606,7 @@ struct CityOption: Identifiable, Hashable {
     }
 }
 
-private enum CitySelectionResult {
+enum CitySelectionResult {
     case current(CityOption)
     case manual(CityOption)
 }
@@ -1025,7 +1025,7 @@ private struct RecommendedShopRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack(alignment: .topLeading) {
-                ShopPhoto(path: shop.imageURL, symbol: shop.symbol)
+                ShopPhoto(path: shop.thumbnailURL, symbol: shop.symbol)
                     .frame(width: 92, height: 86)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
@@ -2215,7 +2215,7 @@ private struct NearbyShopCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 13) {
-            ShopPhoto(path: shop.imageURL, symbol: shop.symbol)
+            ShopPhoto(path: shop.thumbnailURL, symbol: shop.symbol)
                 .frame(width: 58, height: 58)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
@@ -2400,7 +2400,7 @@ private struct StreetRecordRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ShopPhoto(path: record.imageURL, symbol: "storefront.fill")
+            ShopPhoto(path: record.thumbnailURL, symbol: "storefront.fill")
                 .frame(width: 56, height: 56)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
@@ -2543,6 +2543,7 @@ struct RecommendedShop: Identifiable {
     let distance: String
     let phone: String
     let symbol: String
+    let thumbnailURL: String
     let imageURL: String
 }
 
@@ -2552,7 +2553,7 @@ struct NearbyShop: Identifiable {
     let service: String
     let distance: String
     let symbol: String
-    let imageURL: String
+    let thumbnailURL: String
 }
 
 private enum ProfilePalette {

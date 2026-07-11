@@ -167,6 +167,18 @@ final class ShopCaptureTests: XCTestCase {
         XCTAssertEqual(envelope.total?.value, 43)
     }
 
+    func testShopRecordKeepsThumbnailAndOriginalImageURLs() throws {
+        let record = try decodeShopRecord(
+            imageURL: "/uploadfile/shop_capture/original.jpg",
+            thumbnailURL: "/uploadfile/shop_capture/thumb_320_320_original.jpg"
+        )
+
+        XCTAssertEqual(record.resolvedThumbnailURL, "https://api.gmpebr.com/uploadfile/shop_capture/thumb_320_320_original.jpg")
+        XCTAssertEqual(record.resolvedImageURL, "https://api.gmpebr.com/uploadfile/shop_capture/original.jpg")
+        XCTAssertEqual(record.streetReviewRecord.thumbnailURL, record.resolvedThumbnailURL)
+        XCTAssertEqual(record.streetReviewRecord.imageURL, record.resolvedImageURL)
+    }
+
     func testStreetReviewStatesContainOnlyVisibleSegments() {
         XCTAssertEqual(StreetReviewState.allCases, [.pending, .approved, .rejected])
         XCTAssertEqual(StreetReviewState.allCases.map(\.title), ["待审核", "已通过", "未通过"])
@@ -182,6 +194,37 @@ final class ShopCaptureTests: XCTestCase {
 
         XCTAssertEqual(city.initial, "S")
         XCTAssertTrue(city.pinyin.contains("SHI"))
+    }
+
+    func testAdministrativeDivisionStoreBuildsThreeLevelSelection() throws {
+        let data = Data(#"[{"c":"13","n":"河北省","d":[{"c":"1301","n":"石家庄市","d":[{"c":"130102","n":"长安区"}]}]}]"#.utf8)
+        let store = try AdministrativeDivisionStore(data: data)
+        let selection = try XCTUnwrap(store.selection(provinceName: "河北省", cityName: "石家庄市", districtName: "长安区"))
+
+        XCTAssertEqual(selection.0.name, "河北省")
+        XCTAssertEqual(selection.1.name, "石家庄市")
+        XCTAssertEqual(selection.2.name, "长安区")
+    }
+
+    private func decodeShopRecord(imageURL: String, thumbnailURL: String) throws -> ShopCaptureRecord {
+        let json = """
+        {
+          "id": "1",
+          "client_uuid": "test-client",
+          "shop_name": "测试店铺",
+          "service_content": "手机维修",
+          "phone_number": "13800138000",
+          "full_text": "",
+          "image_url": "\(imageURL)",
+          "thumbnail_url": "\(thumbnailURL)",
+          "latitude": "38.04",
+          "longitude": "114.51",
+          "capture_time": "0",
+          "created_at": "0",
+          "audit_status": "1"
+        }
+        """
+        return try JSONDecoder().decode(ShopCaptureRecord.self, from: Data(json.utf8))
     }
 
 }

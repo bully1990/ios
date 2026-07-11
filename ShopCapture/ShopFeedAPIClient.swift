@@ -329,6 +329,7 @@ struct FeedShop: Identifiable, Sendable {
     let symbol: String
     let latitude: Double
     let longitude: Double
+    let thumbnailURL: String
     let imageURL: String
     let distanceMeters: Double
 
@@ -352,6 +353,7 @@ struct FeedShop: Identifiable, Sendable {
         self.symbol = ShopFeedAPIClient.serviceSymbol(text: serviceText)
         self.latitude = Double(record.latitude.value) ?? 0
         self.longitude = Double(record.longitude.value) ?? 0
+        self.thumbnailURL = record.resolvedThumbnailURL
         self.imageURL = record.resolvedImageURL
         self.distanceMeters = distance
     }
@@ -367,6 +369,7 @@ struct FeedShop: Identifiable, Sendable {
         symbol: String,
         latitude: Double,
         longitude: Double,
+        thumbnailURL: String,
         imageURL: String,
         distanceMeters: Double
     ) {
@@ -380,6 +383,7 @@ struct FeedShop: Identifiable, Sendable {
         self.symbol = symbol
         self.latitude = latitude
         self.longitude = longitude
+        self.thumbnailURL = thumbnailURL
         self.imageURL = imageURL
         self.distanceMeters = distanceMeters
     }
@@ -396,6 +400,7 @@ struct FeedShop: Identifiable, Sendable {
             symbol: symbol,
             latitude: latitude,
             longitude: longitude,
+            thumbnailURL: thumbnailURL,
             imageURL: imageURL,
             distanceMeters: distanceMeters
         )
@@ -428,6 +433,7 @@ struct FeedShop: Identifiable, Sendable {
             distance: distance,
             phone: phone,
             symbol: symbol,
+            thumbnailURL: thumbnailURL,
             imageURL: imageURL
         )
     }
@@ -461,7 +467,7 @@ struct NearbyFeedShop: Identifiable, Sendable {
             service: service,
             distance: distance,
             symbol: symbol,
-            imageURL: feedShop.imageURL
+            thumbnailURL: feedShop.thumbnailURL
         )
     }
 }
@@ -501,6 +507,7 @@ struct StreetReviewRecord: Identifiable, Sendable {
     let serviceContent: String
     let phoneNumber: String
     let fullText: String
+    let thumbnailURL: String
     let imageURL: String
     let latitude: Double
     let longitude: Double
@@ -574,13 +581,14 @@ private struct ShopCaptureRecordPage: Sendable {
     let total: Int
 }
 
-private struct ShopCaptureRecord: Decodable, Sendable {
+struct ShopCaptureRecord: Decodable, Sendable {
     let id: FlexibleString
     let clientUUID: FlexibleString
     let shopName: FlexibleString
     let serviceContent: FlexibleString
     let phoneNumber: FlexibleString
     let fullText: FlexibleString
+    let thumbnailURL: FlexibleString
     let imageURL: FlexibleString
     let latitude: FlexibleString
     let longitude: FlexibleString
@@ -595,6 +603,7 @@ private struct ShopCaptureRecord: Decodable, Sendable {
         case serviceContent = "service_content"
         case phoneNumber = "phone_number"
         case fullText = "full_text"
+        case thumbnailURL = "thumbnail_url"
         case imageURL = "image_url"
         case latitude
         case longitude
@@ -627,6 +636,7 @@ private struct ShopCaptureRecord: Decodable, Sendable {
             serviceContent: serviceContent.value,
             phoneNumber: phoneNumber.value,
             fullText: fullText.value,
+            thumbnailURL: resolvedThumbnailURL,
             imageURL: resolvedImageURL,
             latitude: Double(latitude.value) ?? 0,
             longitude: Double(longitude.value) ?? 0,
@@ -636,12 +646,20 @@ private struct ShopCaptureRecord: Decodable, Sendable {
     }
 
     var resolvedImageURL: String {
-        guard !imageURL.value.isEmpty else { return "" }
-        if let url = URL(string: imageURL.value), url.scheme != nil {
+        Self.resolveURL(imageURL.value)
+    }
+
+    var resolvedThumbnailURL: String {
+        Self.resolveURL(thumbnailURL.value)
+    }
+
+    private static func resolveURL(_ value: String) -> String {
+        guard !value.isEmpty else { return "" }
+        if let url = URL(string: value), url.scheme != nil {
             return url.absoluteString
         }
-        return URL(string: imageURL.value, relativeTo: URL(string: "https://api.gmpebr.com")!)?
-            .absoluteURL.absoluteString ?? imageURL.value
+        return URL(string: value, relativeTo: URL(string: "https://api.gmpebr.com")!)?
+            .absoluteURL.absoluteString ?? value
     }
 }
 
@@ -660,7 +678,7 @@ struct ShopFeedFlexibleInt: Decodable {
     }
 }
 
-private struct FlexibleString: Decodable, Sendable {
+struct FlexibleString: Decodable, Sendable {
     let value: String
 
     init(from decoder: Decoder) throws {

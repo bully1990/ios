@@ -35,6 +35,15 @@ final class LocationProvider: NSObject, ObservableObject {
             return latestLocation
         }
 
+        return await requestLocation(timeout: seconds)
+    }
+
+    func freshLocation(timeout seconds: TimeInterval = 5) async -> CLLocation? {
+        await requestLocation(timeout: seconds)
+    }
+
+    private func requestLocation(timeout seconds: TimeInterval) async -> CLLocation? {
+
         guard authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways else {
             print("Warning: location has not been authorized; saving coordinates as 0.0.")
             return nil
